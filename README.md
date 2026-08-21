@@ -47,17 +47,6 @@ adb logcat -s LSPosedLogDaemon:V | grep FanqieHook
 - 14/14 hook 安装成功
 - 实测拦截 `reader_banner` / `video_reader_ad`
 
-## 更新版本
-
-模块硬绑定 versionCode 73332。番茄更新后需重新逆向：
-
-```text
-1. 拉新 APK → jadx + apktool 重新分析
-2. 在 FanqieModule.kt 更新 TARGET_VERSION_CODE
-3. 重新核对 14 个 hook 目标的类名/方法签名
-4. 重新 build + 发版
-```
-
 ## 免责声明
 
 仅供学习研究，绕过广告可能违反番茄《用户协议》。
