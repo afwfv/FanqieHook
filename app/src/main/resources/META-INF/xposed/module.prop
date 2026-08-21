@@ -1,0 +1,12 @@
+id=FanqieHook
+name=Fanqie Ad Remover
+version=v0.4.0
+versionCode=4
+author=afwfv
+description=Removes ads in Fanqie (番茄小说) main process using LSPosed / libxposed API 102. Targets com.dragon.read v7.3.3.32 (versionCode 73332). Hooks are smali-verified for that version only; mismatched versions refuse to install hooks (fail-closed by default, fail-open via compile flag).
+updateJson=
+actionIcon=launcher.png
+minApiVersion=101
+targetApiVersion=102
+staticScope=true
+autoHotReload=false

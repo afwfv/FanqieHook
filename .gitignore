@@ -1,0 +1,36 @@
+# Gradle / Android build outputs
+.gradle/
+build/
+**/build/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kotlin
+*.kotlin_module
+
+# Logs
+*.log
+
+# Test artifacts
+/app/release/
+/app/debug/
+
+# Backup / scratch
+*~
+*.bak
+*.swp
+
+# Editor
+.vscode/

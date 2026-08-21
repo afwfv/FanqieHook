@@ -1,0 +1,287 @@
+package dev.operit.fanqiehook.hooks
+
+import dev.operit.fanqiehook.ClassResolver
+import dev.operit.fanqiehook.HookManager
+import dev.operit.fanqiehook.ModuleLog
+
+/**
+ * All ad-related hooks for `com.dragon.read` versionCode 73332.
+ *
+ * Every hook target below was validated against the APK in
+ * [D:/cc/fanqie-analysis/reports/Fanqie_v73332_逆向分析报告.md] § 5 (smali line numbers recorded in the
+ * static evidence table § 6.1). Do not rename or remove methods without re-running round-1
+ * reverse engineering against the new APK first.
+ *
+ * Position-string policy:
+ *   The string parameter to [BLOCKED_POSITIONS] is matched against `String position` arguments
+ *   taken at runtime. Whitelist user-initiated reward/coin flows so they remain functional
+ *   (see report § 5.3).
+ */
+class AdHooks(
+    private val hooks: HookManager,
+    private val resolver: ClassResolver,
+    private val log: ModuleLog
+) {
+
+    /**
+     * Convenience bundle: install every category. Each `installXxx` is internally try/caught;
+     * one failure never short-circuits another.
+     */
+    fun installAll() {
+        installReaderHooks()
+        installTopViewHooks()
+        installSeriesPauseHooks()
+        installPositionFilter()
+        installVipEntranceHooks()
+        installReaderAdManagerHooks()
+        installInspireAdHooks()
+        installExperimentalSplashHook()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1. Reader hooks
+    //   NsAdImpl.needReadFlowAdLine(ReaderClient)Z   (smali line 21871)
+    //   NsAdImpl.canReaderVideoAdShow()Z            (smali line 1585)
+    //   ReaderAdManager.canLoadAd(String)Z          (smali line 4598)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installReaderHooks() {
+        val nsAd = "com.dragon.read.component.biz.impl.NsAdImpl"
+
+        hooks.replaceBooleanFalse(
+            id = "read-flow-ad-line",
+            method = resolver.findMethod(
+                nsAd,
+                "needReadFlowAdLine",
+                "com.dragon.reader.lib.ReaderClient"
+            ),
+            deoptimize = true,
+        )
+
+        hooks.replaceBooleanFalse(
+            id = "reader-video-ad",
+            method = resolver.findMethod(nsAd, "canReaderVideoAdShow"),
+        )
+
+        hooks.replaceBooleanFalse(
+            id = "reader-ad-for-sati",
+            method = resolver.findMethod(
+                "com.dragon.read.reader.ad.ReaderAdManager",
+                "canLoadAd",
+                "String"
+            ),
+            deoptimize = true,
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2. TopView hooks
+    //   NsAdImpl.checkCanShowTopViewInMainPage(AbsActivity)Z                  (smali line 3414)
+    //   NsAdImpl.checkCanShowTopViewInReader(AbsActivity, ReaderClient, String)Z  (smali line 3430)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installTopViewHooks() {
+        val nsAd = "com.dragon.read.component.biz.impl.NsAdImpl"
+
+        hooks.replaceBooleanFalse(
+            id = "topview-main",
+            method = resolver.findMethod(
+                nsAd,
+                "checkCanShowTopViewInMainPage",
+                "com.dragon.read.base.AbsActivity"
+            ),
+        )
+
+        hooks.replaceBooleanFalse(
+            id = "topview-reader",
+            method = resolver.findMethod(
+                nsAd,
+                "checkCanShowTopViewInReader",
+                "com.dragon.read.base.AbsActivity",
+                "com.dragon.reader.lib.ReaderClient",
+                "String"
+            ),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3. Short-series pause-ad hooks
+    //   SeriesPauseAdImpl.enablePauseAd()Z            (smali line 343)
+    //   SeriesPauseAdImpl.canShowPauseAd(qh4.h)Z      (smali line 104)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installSeriesPauseHooks() {
+        val pause = "com.dragon.read.ad.onestop.seriespause.impl.SeriesPauseAdImpl"
+
+        hooks.replaceBooleanFalse(
+            id = "series-pause-enable",
+            method = resolver.findMethod(pause, "enablePauseAd"),
+        )
+
+        hooks.replaceBooleanFalse(
+            id = "series-pause-show",
+            method = resolver.findMethod(pause, "canShowPauseAd", "qh4.h"),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 4. Position filter (the "surgical" hook — most defensive)
+    //
+    //   NsAdImpl.checkAdAvailable(String position, String source)Z        (smali line 3385)
+    //   h83.a.checkAdAvailable(String position, String source)Z          (smali line 2805)
+    //
+    //   Multiple call sites are hit; the obfuscated `h83.a` is the impl of
+    //   `com.dragon.read.ad.manager.NsAdConfigManagerApi` and serves as the
+    //   ad-config cache front-end. Hooking both gives defence-in-depth.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installPositionFilter() {
+        listOf(
+            "com.dragon.read.component.biz.impl.NsAdImpl",
+            "h83.a"
+        ).forEach { className ->
+            val method = resolver.findMethod(className, "checkAdAvailable", "String", "String")
+            hooks.installBooleanFilter(
+                id = "position-filter:$className",
+                method = method,
+                deoptimize = false,
+                shouldBlock = { args ->
+                    val position = args.getOrNull(0)?.toString().orEmpty()
+                    val blocked = position in BLOCKED_POSITIONS
+                    if (blocked) {
+                        log.info(
+                            "blocked ad position=$position source=${args.getOrNull(1)} " +
+                                "via $className.checkAdAvailable"
+                        )
+                    }
+                    blocked
+                }
+            )
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 5. VIP entrance hooks
+    //   NsVipImpl.canShowVipEntranceHere(VipEntrance)Z  (smali line 877)
+    //   NsVipImpl.canShowVipEntranceInAd()Z            (smali line 956)
+    //
+    //   Cosmetic only: hides VIP upsell entry points; does NOT touch entitlement data, VipInfoModel,
+    //   or any server-validated VIP flag.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installVipEntranceHooks() {
+        val nsVip = "com.dragon.read.component.biz.impl.NsVipImpl"
+
+        hooks.replaceBooleanFalse(
+            id = "hide-vip-entrance",
+            method = resolver.findMethod(
+                nsVip,
+                "canShowVipEntranceHere",
+                "com.dragon.read.component.biz.api.data.VipEntrance"
+            ),
+        )
+
+        hooks.replaceBooleanFalse(
+            id = "hide-vip-entrance-in-ad",
+            method = resolver.findMethod(nsVip, "canShowVipEntranceInAd"),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 6. ReaderAdManager extended hooks
+    //   needInterceptFetchAd(String)Z  (smali line 7918)
+    //
+    //   When `canLoadAd` already returns false, `needInterceptFetchAd` is the second line of defence
+    //   that decides whether to actually issue the network request. Hooking it is safer than hooking
+    //   the request layer because we still let non-passive code paths fall through.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installReaderAdManagerHooks() {
+        hooks.replaceBooleanTrue(
+            id = "reader-fetch-intercept",
+            method = resolver.findMethod(
+                "com.dragon.read.reader.ad.ReaderAdManager",
+                "needInterceptFetchAd",
+                "String"
+            ),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 7. Inspire / reward hooks
+    //
+    //   These methods live on NsAdImpl and control whether an "inspire"-style ad surfaces.
+    //   We DO NOT blanket-disable them (reward/coin flows rely on them); we only force the
+    //   passive "isXxxAvailable" flags to false so the entry-point UI hides the slot.
+    //
+    //   smali line numbers (NsAdImpl):
+    //     - disableAdGift()Z          (line 5269)
+    //     - inspireAdDisable()Z       (similar name region; resolved via reflection)
+    //     - disableBannerDismissAnimation()Z  (line 5305)
+    //
+    //   If a method name turns out not to exist on NsAdImpl in a future version, [resolver.findMethod]
+    //   returns null and [HookManager.replaceBooleanFalse] logs a WARN. No silent skip.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installInspireAdHooks() {
+        val nsAd = "com.dragon.read.component.biz.impl.NsAdImpl"
+
+        // Hide the "no-ad gift" UI banner. Does NOT disable user-initiated rewards.
+        hooks.replaceBooleanTrue(
+            id = "inspire-disable-ad-gift",
+            method = resolver.findMethod(nsAd, "disableAdGift"),
+        )
+
+        // Disable banner dismiss animation, which is purely cosmetic and tightly bound to ad UX.
+        hooks.replaceBooleanTrue(
+            id = "inspire-disable-banner-dismiss-anim",
+            method = resolver.findMethod(nsAd, "disableBannerDismissAnimation"),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 8. Experimental splash attribution hook
+    //
+    //   AttributionManager.hasHitAttribution()Z   (smali line 2954)
+    //
+    //   Defaults to OFF. Splash attribution is the channel by which the splash ad tracks
+    //   installation source. Returning false skips it, but the splash ad may still show.
+    //   Enable only if you understand the compliance implication.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installExperimentalSplashHook() {
+        if (!ENABLE_ATTRIBUTION_SPLASH_BYPASS) return
+        hooks.replaceBooleanFalse(
+            id = "experimental-splash-attribution",
+            method = resolver.findMethod(
+                "com.dragon.read.pages.splash.AttributionManager",
+                "hasHitAttribution"
+            ),
+        )
+    }
+
+    private companion object {
+        // Passively displayed positions; USER-INITIATED reward / coin positions are intentionally
+        // absent. Mirrors the previous AdHooks.kt whitelist. Additions are made in the report's
+        // § 5.3 table; review before merging.
+        val BLOCKED_POSITIONS = setOf(
+            "splash_ad",
+            "page_front_ad",
+            "page_middle_ad",
+            "page_end_ad",
+            "reader_banner",
+            "reader_text_link_ad",
+            "reader_disconnected_ad",
+            "reader_ad_for_sati",
+            "video_reader_ad",
+            // Additional positions identified in the static call graph (see report § 5.2):
+            "topview_main",
+            "topview_reader",
+            "series_pause_ad"
+        )
+
+        // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
+        // to skip install-source reporting, which may affect compliance. Review before shipping.
+        const val ENABLE_ATTRIBUTION_SPLASH_BYPASS = false
+    }
+}

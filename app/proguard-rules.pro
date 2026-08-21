@@ -1,0 +1,1 @@
+-keep class dev.operit.fanqiehook.FanqieModule { *; }
