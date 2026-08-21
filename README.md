@@ -1,22 +1,21 @@
 # FanqieHook
 
-Removes ads inside the Fanqie (番茄小说) Android app at the **business-logic layer**, before
-they ever reach the rendering pipeline. Implemented as an LSPosed / libxposed API 102 module.
+针对番茄小说 (com.dragon.read) 主进程，在**业务逻辑层**拦截广告，使其永远不会进入渲染管线。基于
+LSPosed / libxposed API 102 实现。
 
-> **Target**: `com.dragon.read` v7.3.3.32 (`versionCode=73332`)
-> **Framework**: LSPosed IT v2.1.1+ (KernelSU / ZygiskSU)
-> **API**: libxposed `io.github.libxposed:api:102.0.0`
+> **目标版本**：`com.dragon.read` v7.3.3.32（`versionCode=73332`）
+> **框架要求**：LSPosed IT v2.1.1+（KernelSU / ZygiskSU）
+> **API**：`io.github.libxposed:api:102.0.0`
 
-## Why
+## 为什么需要这个模块
 
-Fanqie (番茄小说) is heavily monetised with Pangle / 穿山甲 and OneStop / MUnion ads. The
-existing community hooks (e.g. HookFanqie) are pinned to old class names and crash on the
-current APK. This module was reverse-engineered from scratch against the current version
-(73332) — every hook target is smali-verified and will fail closed on version mismatch.
+番茄小说重度依赖穿山甲（Pangle）、OneStop、MUnion 广告 SDK。社区现存的 HookFanqie 等模块绑定了
+旧版本的类名，在新版本 APK 上会崩溃。本模块从零逆向当前版本（73332），所有 hook 目标都经过
+smali 行号验证，版本不匹配时自动 fail-closed 拒绝安装。
 
-## What it does
+## 它做什么
 
-14 hooks in `NsAdImpl`, `ReaderAdManager`, `NsVipImpl`, and `SeriesPauseAdImpl`, intercepting:
+14 个 hook 注入到 `NsAdImpl`、`ReaderAdManager`、`NsVipImpl`、`SeriesPauseAdImpl`，拦截：
 
 | Hook ID | Target | Position blocked |
 |---|---|---|
@@ -44,85 +43,82 @@ reader_ad_for_sati, video_reader_ad,
 topview_main, topview_reader, series_pause_ad
 ```
 
-**User-initiated reward / coin flows are NOT blocked.**
+**用户主动触发的奖励 / 金币流程不会被屏蔽。**
 
-## Build
+## 编译
 
-Requires JDK 17/21 (NOT 25 — Kotlin 2.0.21 rejects JDK 25 as `25.0.1`) and Android SDK with
-`platforms;android-35` + `build-tools;35.0.0`.
+依赖 JDK 17/21（**不可用 JDK 25** —— Kotlin 2.0.21 会把 `25.0.1` 抛 `IllegalArgumentException`），
+以及 Android SDK（`platforms;android-35` + `build-tools;35.0.0`）。
 
 ```bash
 export JAVA_HOME=/path/to/jdk-21
 export ANDROID_HOME=/path/to/AndroidSDK
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 ./gradlew :app:assembleRelease --no-daemon --console=plain
-# Output: app/build/outputs/apk/release/app-release.apk
+# 产物：app/build/outputs/apk/release/app-release.apk
 ```
 
-## Install
+## 安装
 
 ```bash
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-Then in **LSPosed Manager** → 模块 (Modules):
-1. Enable **FanqieHook**
-2. Scope: tick **`com.dragon.read`**
-3. Soft-reboot or restart `com.dragon.read`
+然后打开 **LSPosed Manager** → 模块：
+1. 勾选 **FanqieHook**
+2. 作用域：勾选 **`com.dragon.read`**
+3. 软重启或强制重启 `com.dragon.read`
 
-## Safety
+## 安全性
 
-* `staticScope=true` + a `scope.list` containing only `com.dragon.read`
-* Process gate: only the **main process** `com.dragon.read` installs hooks; child processes
-  (`:push`, `:widgetProvider`, `:miniappX`, `:download`, `:privileged_process*`,
-  `:sandboxed_process*`, …) load the module but return at `onPackageReady` after process check.
-* Version gate: refuses to install if `versionCode != 73332`. On Android 14+ where
-  `ActivityThread.currentApplication()` is greylisted, this can falsely trip — see "Failure
-  modes" below.
+* `staticScope=true` + `scope.list` 仅声明 `com.dragon.read`
+* **进程守门**：仅在 `com.dragon.read` **主进程**安装 hook；子进程（`:push`、`:widgetProvider`、
+  `:miniappX`、`:download`、`:privileged_process*`、`:sandboxed_process*` …）会加载模块但在
+  `onPackageReady` 进程检查后直接返回
+* **版本守门**：`versionCode != 73332` 时拒绝安装。Android 14+ 上 `ActivityThread.currentApplication()`
+  被 hidden API greylist 屏蔽，可能误触发——见下文"失败模式"
 
-## Failure modes
+## 失败模式
 
-The module attempts `PackageManager.getPackageArchiveInfo()` (static, no Context) and falls
-back to `ActivityThread.currentApplication()` to read `versionCode`. On Android 14+ both may
-fail (greylist on `currentApplication`, no Context available at `PackageReadyParam`). In
-that case a compile-time `FAIL_OPEN = true` flag lets hooks install anyway with a strong
-warning logged. Verify hook installation manually via `adb logcat -s LSPosedLogDaemon:V`
-and look for 14 `hook installed:` lines.
+模块优先尝试 `PackageManager.getPackageArchiveInfo()`（公开静态 API，无需 Context），失败时回退
+到 `ActivityThread.currentApplication()` 反射读取 `versionCode`。Android 14+ 两个策略都可能被
+greylist 阻挡，此时编译开关 `FAIL_OPEN = true` 会让 hook 仍然安装并留下强警告日志。可通过
+`adb logcat -s LSPosedLogDaemon:V` 验证，看到 14 条 `hook installed:` 即表示所有 hook 已生效。
 
-## Architecture
+## 架构
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  LSPosed IT (KernelSU/Zygisk) — zygote-level injection        │
+│  LSPosed IT（KernelSU/Zygisk）—— zygote 层注入                 │
 └────────────────────────────────────────────────────────────────┘
         │
         ▼  onModuleLoaded → onPackageReady
 ┌────────────────────────────────────────────────────────────────┐
 │  FanqieModule                                                   │
-│    • process gate (only main com.dragon.read)                   │
-│    • version gate (fail-closed / fail-open via compile flag)    │
-│    • instantiates HookManager                                   │
+│    • 进程守门（仅主进程 com.dragon.read）                       │
+│    • 版本守门（fail-closed / 编译开关切 fail-open）             │
+│    • 实例化 HookManager                                          │
 └────────────────────────────────────────────────────────────────┘
         │
         ▼  AdHooks.installAll()
 ┌────────────────────────────────────────────────────────────────┐
 │  HookManager + ClassResolver                                    │
-│    • replaceBooleanFalse/True for boolean returns              │
-│    • try/catch per hook — one failure cannot stop the rest     │
+│    • replaceBooleanFalse/True 拦截布尔返回值                    │
+│    • 每个 hook 独立 try/catch，单点失败不影响其他 hook          │
 └────────────────────────────────────────────────────────────────┘
         │
         ▼
 ┌────────────────────────────────────────────────────────────────┐
-│  Target classes (smali-verified at known line numbers)         │
-│    com.dragon.read.component.biz.impl.NsAdImpl                 │
-│    com.dragon.read.component.biz.impl.NsVipImpl                │
-│    com.dragon.read.reader.ad.ReaderAdManager                    │
+│  目标类（smali 行号验证）                                       │
+│    com.dragon.read.component.biz.impl.NsAdImpl                  │
+│    com.dragon.read.component.biz.impl.NsVipImpl                 │
+│    com.dragon.read.reader.ad.ReaderAdManager                     │
 │    com.dragon.read.ad.onestop.seriespause.impl.SeriesPauseAdImpl│
-│    h83.a (obfuscated mirror)                                    │
+│    h83.a（混淆类镜像）                                          │
 └────────────────────────────────────────────────────────────────┘
 ```
 
-## Verification (real device, POCO dada / HyperOS 2 / Android 16)
+## 真机验证（POCO dada / HyperOS 2 / Android 16）
 
 ```text
 [INFO] module loaded: process=com.dragon.read api=102 framework=LSPosed v2.1.1-it
@@ -145,22 +141,21 @@ and look for 14 `hook installed:` lines.
 [INFO] blocked ad position=video_reader_ad source=null via h83.a.checkAdAvailable
 ```
 
-14 of 14 hooks installed; multiple `blocked ad position=` entries observed during normal use.
+14 / 14 hook 全部安装；正常使用中观察到多条 `blocked ad position=` 拦截日志。
 
-## Notes for other versions
+## 升级到新版本的步骤
 
-The hook targets are tied to **versionCode 73332**. When Fanqie publishes a new build:
+所有 hook 目标**硬绑定** `versionCode=73332`。番茄发新版时：
 
-1. Pull the new APK and re-run the round-1 reverse analysis (jadx + apktool + smali verify)
-2. Bump `TARGET_VERSION_CODE` in `FanqieModule.kt`
-3. Re-verify each hook target — class names and method signatures can be obfuscated
-4. The fail-closed gate is your friend here; do not enable `FAIL_OPEN` without verifying
+1. 拉新 APK 重新跑第一轮逆向分析（jadx + apktool + smali 行号验证）
+2. 在 `FanqieModule.kt` 中更新 `TARGET_VERSION_CODE`
+3. 重新核对每个 hook 目标——类名、方法签名可能被混淆
+4. 谨慎使用 fail-closed 守门；不要盲目开启 `FAIL_OPEN`
 
-## License
+## 许可证
 
-MIT — see `LICENSE`.
+MIT —— 见 `LICENSE`。
 
-## Disclaimer
+## 免责声明
 
-This module is for personal use and educational purposes. Bypassing in-app advertising may
-violate Fanqie's Terms of Service. Use at your own risk.
+本模块仅供个人使用和学习研究。绕过应用内广告可能违反番茄小说《用户协议》，使用风险自担。
