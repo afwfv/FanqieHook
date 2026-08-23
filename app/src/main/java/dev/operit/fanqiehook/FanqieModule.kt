@@ -7,7 +7,7 @@ import dev.operit.fanqiehook.hooks.DefenseHooks
 import dev.operit.fanqiehook.hooks.UiCleanHooks
 import dev.operit.fanqiehook.hooks.VipHooks
 import dev.operit.fanqiehook.support.HookSupport
-import dev.operit.fanqiehook.web.WebConsole
+import dev.operit.fanqiehook.web.BookSourceServer
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
@@ -164,14 +164,13 @@ class FanqieModule : XposedModule() {
         HookSupport.dragonApplication = app
         HookSupport.dragonClassLoader = app.classLoader
 
-        // Bind config sources: remote prefs (module app) → host SP fallback.
+        // Bind config source: framework remote prefs (module app is the only writer).
         val remote = runCatching { getRemotePreferences(ModuleConfig.SP_NAME) }.getOrNull()
-        val hostSp = runCatching {
-            app.getSharedPreferences(ModuleConfig.SP_NAME, android.content.Context.MODE_PRIVATE)
-        }.getOrNull()
-        ModuleConfig.init(remote, hostSp)
+        ModuleConfig.init(remote)
+        log.info("config bound: remote=${remote != null}")
 
-        // Feature-gated hook groups.
+        // Feature hook groups — installed unconditionally; each callback reads
+        // its switch at runtime (live toggle, no restart needed).
         runCatching { DefenseHooks.installAll() }
             .onFailure { log.warn("DefenseHooks failed: ${it.message}") }
         runCatching { VipHooks.installAll() }
@@ -179,14 +178,14 @@ class FanqieModule : XposedModule() {
         runCatching { UiCleanHooks.installAll() }
             .onFailure { log.warn("UiCleanHooks failed: ${it.message}") }
 
-        // Optional web console.
-        if (ModuleConfig.startWebServer()) {
-            runCatching { WebConsole.start(ModuleConfig.webPort()) }
-                .onFailure { log.warn("WebConsole failed: ${it.message}") }
+        // Book source server (Legado-compatible API, for reader apps).
+        if (ModuleConfig.bookSource()) {
+            runCatching { BookSourceServer.start(ModuleConfig.bookSourcePort()) }
+                .onFailure { log.warn("BookSourceServer failed: ${it.message}") }
         }
 
         log.info("phase-2 hooks installed (localVip=${ModuleConfig.localVip()}, " +
-            "uiClean=${ModuleConfig.uiClean()}, web=${ModuleConfig.startWebServer()})")
+            "uiClean=${ModuleConfig.uiClean()}, bookSource=${ModuleConfig.bookSource()})")
     }
 
     /**
@@ -202,7 +201,6 @@ class FanqieModule : XposedModule() {
         hookManager = null
         featureHooksInstalled = false
         HookSupport.reset()
-        runCatching { WebConsole.stop() }
         return true
     }
 

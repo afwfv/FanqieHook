@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 番茄白色剪影（徽章前景，108dp 画布内 24dp 边距） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 果身 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,44 a22,22 0 1,0 0.01,0 Z" />
+    <!-- 左叶 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42 C51,34 44,31 37,32 C39,39 46,43 54,42 Z" />
+    <!-- 右叶 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42 C57,34 64,31 71,32 C69,39 62,43 54,42 Z" />
+    <!-- 果柄 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M52.5,42 L55.5,42 L55.5,48 L52.5,48 Z" />
+</vector>

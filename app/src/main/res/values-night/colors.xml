@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ── Soft UI 深色色板 ─────────────────────────────── -->
+    <color name="soft_bg_top">#2B303A</color>
+    <color name="soft_bg_bottom">#232830</color>
+    <color name="soft_surface">#282D36</color>
+    <color name="soft_surface_deep">#22262E</color>
+    <color name="soft_shadow_light">#343B47</color>
+    <color name="soft_shadow_dark">#161A21</color>
+
+    <color name="accent">#E8836B</color>
+    <color name="accent_deep">#C9664E</color>
+    <color name="accent_soft">#B06552</color>
+
+    <color name="text_primary">#D8DCE4</color>
+    <color name="text_secondary">#818A99</color>
+
+    <color name="led_on">#5CD6A9</color>
+    <color name="led_off">#3A414D</color>
+
+    <color name="plate_vip">#C96B57</color>
+    <color name="plate_defense">#5A79C4</color>
+    <color name="plate_clean">#3F9C72</color>
+    <color name="plate_book">#7A66C0</color>
+</resources>

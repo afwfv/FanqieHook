@@ -45,7 +45,9 @@ class Reflect private constructor(private val target: Any?) {
 
     /** Get a field value from the wrapped object (searches superclass chain). */
     fun field(name: String): Reflect = Reflect(tryOrNull {
-        var cls: Class<*>? = target?.javaClass ?: (target as? Class<*>)
+        // When target IS a Class, search its (static) fields — target.javaClass would
+        // be java.lang.Class and never find anything.
+        var cls: Class<*>? = (target as? Class<*>) ?: target?.javaClass
         while (cls != null) {
             val f = tryOrNull { cls.getDeclaredField(name) }
             if (f != null) {
@@ -61,7 +63,7 @@ class Reflect private constructor(private val target: Any?) {
     /** Set a field on the wrapped object (searches superclass chain). */
     fun set(name: String, value: Any?): Reflect {
         tryOrNull {
-            var cls: Class<*>? = target?.javaClass ?: (target as? Class<*>)
+            var cls: Class<*>? = (target as? Class<*>) ?: target?.javaClass
             while (cls != null) {
                 val f = tryOrNull { cls.getDeclaredField(name) }
                 if (f != null) {
@@ -112,16 +114,15 @@ class Reflect private constructor(private val target: Any?) {
             f.isAccessible = true
             return f.get(null)
         }
-        // Java singleton pattern
-        for (name in listOf("getInstance", "a", "b")) {
+        // Scan ALL static no-arg methods returning the class itself — survives
+        // obfuscated getter renames (P() → g() etc.).
+        for (m in cls.declaredMethods) {
+            if (m.parameterCount != 0 || !java.lang.reflect.Modifier.isStatic(m.modifiers)) continue
+            if (m.returnType != cls) continue
             runCatching {
-                val m = cls.declaredMethods.firstOrNull {
-                    it.name == name && it.parameterCount == 0 &&
-                        java.lang.reflect.Modifier.isStatic(it.modifiers)
-                } ?: return@runCatching
                 m.isAccessible = true
                 val result = m.invoke(null)
-                if (result != null && cls.isInstance(result)) return result
+                if (result != null) return result
             }
         }
         return null

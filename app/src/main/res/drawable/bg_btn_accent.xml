@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主操作按钮：新拟物凸起 + 珊瑚渐变表面；按压态收敛阴影并加深 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 按压：阴影收敛（1dp）、表面压暗 -->
+    <item android:state_pressed="true">
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="18dp" />
+                    <solid android:color="@color/soft_shadow_light" />
+                </shape>
+            </item>
+            <item android:left="1dp" android:top="1dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="18dp" />
+                    <solid android:color="@color/soft_shadow_dark" />
+                </shape>
+            </item>
+            <item android:left="1dp" android:top="1dp" android:right="1dp" android:bottom="1dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="17dp" />
+                    <solid android:color="@color/accent_deep" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <!-- 默认：凸起浮雕 -->
+    <item>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="18dp" />
+                    <solid android:color="@color/soft_shadow_light" />
+                </shape>
+            </item>
+            <item android:left="2dp" android:top="2dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="18dp" />
+                    <solid android:color="@color/soft_shadow_dark" />
+                </shape>
+            </item>
+            <item android:left="2dp" android:top="2dp" android:right="2dp" android:bottom="2dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="16dp" />
+                    <gradient
+                        android:angle="270"
+                        android:startColor="@color/accent"
+                        android:endColor="@color/accent_deep" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+</selector>

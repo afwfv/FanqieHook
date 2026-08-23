@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Tomato body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,42 a23,23 0 1,0 0.01,0 Z" />
+    <!-- Left leaf -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,40 C51,32 44,29 37,30 C39,37 46,41 54,40 Z" />
+    <!-- Right leaf -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,40 C57,32 64,29 71,30 C69,37 62,41 54,40 Z" />
+    <!-- Stem -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M52,40 L56,40 L56,46 L52,46 Z" />
+    <!-- Highlight -->
+    <path
+        android:fillColor="#33FFFFFF"
+        android:pathData="M44,58 a6,6 0 1,1 6,10 a11,11 0 0,0 -6,-10 Z" />
+</vector>

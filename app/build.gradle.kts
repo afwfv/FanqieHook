@@ -1,13 +1,13 @@
 plugins {
+    // AGP 9 has built-in Kotlin support; the kotlin.android plugin is removed.
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
     namespace = "dev.operit.fanqiehook"
-    // The host app declares compileSdkVersion=35 (Android 15); match it so reflection against
-    // framework classes added in API 35 (e.g. longVersionCode) stays compile-clean.
-    compileSdk = 35
+    // libxposed:service 102.0.0 requires compileSdk 37; targetSdk stays 35 so
+    // runtime behavior is unchanged (compileSdk only affects compile-time APIs).
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dev.operit.fanqiehook"
@@ -30,7 +30,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
 
     packaging {
         resources {
@@ -41,6 +40,18 @@ android {
                 "META-INF/LGPL2.1"
             )
         }
+    }
+
+    buildFeatures {
+        // MainActivity displays the module version from BuildConfig.
+        buildConfig = true
+    }
+}
+
+// AGP 9 built-in Kotlin: top-level kotlin.compilerOptions replaces android.kotlinOptions.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -54,6 +65,14 @@ dependencies {
     // Coordinate is `org.luckypray:dexkit` (NOT `io.github.lsposed:dexkit` — that's the old 1.x line).
     implementation("org.luckypray:dexkit:2.0.4")
 
-    // Embedded HTTP server for the in-host web console (config panel + book source API).
+    // Framework communication service: activation detection + remote preferences
+    // (module app ↔ framework shared storage ↔ host process).
+    implementation("io.github.libxposed:service:102.0.0")
+
+    // Embedded HTTP server for the in-host web console (book source API).
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+
+    // Settings UI (module app side).
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
 }

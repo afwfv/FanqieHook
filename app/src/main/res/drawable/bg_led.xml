@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- LED 灯座：新拟物凹陷圆环，灯芯颜色代码染色 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 暗阴影（左上露出） -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/soft_shadow_dark" />
+        </shape>
+    </item>
+    <!-- 亮阴影（右下露出） -->
+    <item android:left="1dp" android:top="1dp">
+        <shape android:shape="oval">
+            <solid android:color="@color/soft_shadow_light" />
+        </shape>
+    </item>
+    <!-- 灯芯槽 -->
+    <item android:left="1dp" android:top="1dp" android:right="1dp" android:bottom="1dp">
+        <shape android:shape="oval">
+            <solid android:color="@color/soft_surface_deep" />
+        </shape>
+    </item>
+</layer-list>

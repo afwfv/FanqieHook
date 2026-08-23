@@ -88,11 +88,52 @@ object BookApi {
     private const val TONE_QUALITY = "com.dragon.read.rpc.model.ToneQuality"
 
     // Decryption helpers (obfuscated where marked).
-    private const val W85_I = "w85.i"                              // key provider
-    private const val U56_A = "u56.a"                              // batch facade
+    private const val U56_A_FALLBACK = "u56.a"                     // batch facade (v73332)
     private const val READER_API = "com.dragon.read.component.biz.api.NsReaderServiceApi"
-    private const val DECRYPT_UTILS = "com.dragon.read.reader.utils.o"
     private const val DECRYPT_KEY = "com.dragon.read.reader.DecryptKey"
+
+    // ── 解密链路（热更后，全部在 chapter service 实例上，运行时验证） ─────────
+    //
+    // service = NsReaderServiceApi.IMPL.readerChapterService()  // reader.services.t
+    //   a(String):Single<DecryptKey>   — 取内容密钥
+    //   b(int, String):Single          — 按 keyVersion 取密钥（参数序与 a 相反）
+    //   d(String):int                  — keyRegisterTs 获取器
+    //   r(String, DecryptKey, boolean, String, String):String — 解密
+    //
+    // DecryptKey: f:boolean = 明文标志；static g = 明文 key 持有者（g.b() 取 key）。
+
+    /** Chapter service 单例（com.dragon.read.reader.services.t 实例）。 */
+    @Volatile private var chapterService: Any? = null
+
+    private fun chapterService(): Any? {
+        chapterService?.let { return it }
+        val s = runCatching {
+            Reflect.onClass(READER_API).field("IMPL").call("readerChapterService").get()
+        }.getOrNull()
+        if (s != null) {
+            chapterService = s
+            HookSupport.log?.info("[$TAG] chapter service 定位: ${s.javaClass.name}")
+        } else {
+            HookSupport.log?.warn("[$TAG] chapter service 不可达")
+        }
+        return s
+    }
+
+    /** 批量正文 facade：DexKit 按 BatchFullRequest 参数定位，v73332 名兜底。 */
+    private fun batchFacade(): String {
+        batchFacadeResolved?.let { return it }
+        val candidates = HookSupport.classResolver?.findClassesByMethodSignature(
+            paramTypeNames = listOf(BATCH_FULL_REQ),
+        ) ?: emptyList()
+        val result = candidates.firstOrNull()
+            ?.substringBefore('$')
+            ?: U56_A_FALLBACK
+        batchFacadeResolved = result
+        HookSupport.log?.info("[$TAG] RPC batchFacade 定位: $result")
+        return result
+    }
+
+    @Volatile private var batchFacadeResolved: String? = null
 
     /** Route dispatcher. Returns a JSON string, or null for 404. */
     fun handle(uri: String, p: Map<String, String>): String? = try {
@@ -300,9 +341,23 @@ object BookApi {
 
     fun getBatchContent(bookId: String, itemIds: List<String>): Any? {
         if (itemIds.isEmpty()) throw IllegalArgumentException("item_ids 不能为空")
+        if (!isValidNumericId(bookId)) throw IllegalArgumentException("无效的bookId: $bookId")
         val req = newRequest(BATCH_FULL_REQ)!!
-        Reflect.on(req).set("itemIds", itemIds)
-        val response = callFunction(U56_A, req, "h")
+        val r = Reflect.on(req)
+        r.set("bookId", bookId)
+        // itemIds 为逗号分隔字符串（新版模型），keyRegisterTs 与 reqType 必填。
+        r.set("itemIds", itemIds.joinToString(","))
+        r.set("keyRegisterTs", runCatching {
+            val svc = chapterService() ?: return@runCatching 0
+            (Reflect.on(svc).call("d", getUserId()).get() as? Number)?.toInt() ?: 0
+        }.getOrDefault(0))
+        runCatching {
+            val reqType = HookSupport.dragonLoader()
+                .loadClass("readersaas.com.dragon.read.saas.rpc.model.BatchFullReqType")
+                .getDeclaredField("Download").get(null)
+            r.set("reqType", reqType)
+        }
+        val response = callFunction(batchFacade(), req, "h")
         val data = Reflect.on(response).field("data").get()
         if (data is Map<*, *>) {
             val decrypted = HashMap<Any?, Any?>()
@@ -372,12 +427,11 @@ object BookApi {
             Reflect.onClass(NOVEL_TEXT_TYPE).call("findByValue", novelTextType).get()
                 ?.let { r.set("novelTextType", it) }
         }
-        // keyRegisterTs: registration timestamp of the content key.
-        r.set("keyRegisterTs", try {
-            (Reflect.onClass(W85_I).call("C", getUserId()).get() as? Number)?.toInt() ?: 0
-        } catch (t: Throwable) {
-            0
-        })
+        // keyRegisterTs: registration timestamp of the content key (service.d).
+        r.set("keyRegisterTs", runCatching {
+            val svc = chapterService() ?: return@runCatching 0
+            (Reflect.on(svc).call("d", getUserId()).get() as? Number)?.toInt() ?: 0
+        }.getOrDefault(0))
         return req
     }
 
@@ -403,37 +457,67 @@ object BookApi {
         bookId: String,
         chapterId: String,
     ): Any {
-        val plainTextKey = try {
-            if (keyVersion == Int.MIN_VALUE) {
-                Reflect.onClass(DECRYPT_KEY).field("f183364g").call("b").get()
-            } else {
-                Reflect.onClass(W85_I).call("o", getUserId(), keyVersion).call("blockingGet").get()
+        // 1. Fetch the decryption key (service.a/b → Single → blockingGet).
+        val plainTextKey = fetchKey(keyVersion)
+            ?: return itemContent.also {
+                HookSupport.log?.warn("[$TAG] 密钥获取失败，返回密文 (keyVersion=$keyVersion)")
+                Reflect.on(it).set("content", encryptedContent)
             }
-        } catch (t: Throwable) {
-            null
-        } ?: return itemContent.also { Reflect.on(it).set("content", encryptedContent) }
 
-        // When the key object reports "success == true" the content is already plaintext.
-        val success = Reflect.on(plainTextKey).call("c").getBoolean()
-        if (success) {
+        // 2. Plaintext flag: legacy key.c() → new DecryptKey.f field.
+        val isPlain = runCatching {
+            try {
+                Reflect.on(plainTextKey).call("c").getBoolean()
+            } catch (t: Throwable) {
+                (Reflect.on(plainTextKey).field("f").get() as? Boolean) ?: false
+            }
+        }.getOrDefault(false)
+        if (isPlain) {
             Reflect.on(itemContent).set("content", encryptedContent)
             return itemContent
         }
 
-        val plaintext = try {
-            // Primary: reader chapter service.
-            val service = Reflect.onClass(READER_API).field("IMPL").call("readerChapterService").get()
-            Reflect.on(service).call("r", encryptedContent, plainTextKey,
+        // 3. Decrypt via the same chapter service instance (service.r).
+        val plaintext = runCatching {
+            val svc = chapterService() ?: return@runCatching null
+            Reflect.on(svc).call("r", encryptedContent, plainTextKey,
                 compressStatus > 0, bookId, chapterId).get() as? String
-        } catch (t: Throwable) {
-            // Fallback: reader utils.
-            Reflect.onClass(DECRYPT_UTILS)
-                .call("b", encryptedContent, plainTextKey, compressStatus > 0, bookId, chapterId)
-                .get() as? String
-        } ?: encryptedContent
+        }.getOrNull() ?: encryptedContent
 
         Reflect.on(itemContent).set("content", plaintext)
         return itemContent
+    }
+
+    /**
+     * 密钥获取：
+     *  - keyVersion == MIN_VALUE → DecryptKey 明文持有者（static g → holder.b()）
+     *  - 其余 → service.b(keyVersion, userId) 优先，失败退 service.a(userId)
+     *    （两者都返回 Single<DecryptKey>，blockingGet 阻塞取值）
+     */
+    private fun fetchKey(keyVersion: Int): Any? {
+        if (keyVersion == Int.MIN_VALUE) return getPlainTextKey()
+        val svc = chapterService() ?: return null
+        return runCatching {
+            val single = runCatching {
+                Reflect.on(svc).call("b", keyVersion, getUserId()).get()
+            }.getOrElse {
+                Reflect.on(svc).call("a", getUserId()).get()
+            }
+            Reflect.on(single).call("blockingGet").get()
+        }.getOrNull()
+    }
+
+    /** DecryptKey 明文密钥持有者：字段名 f183364g（v73332）→ g（热更后）。 */
+    private fun getPlainTextKey(): Any? {
+        val cls = HookSupport.dragonLoader().loadClass(DECRYPT_KEY)
+        for (fieldName in listOf("f183364g", "g")) {
+            val field = runCatching {
+                cls.getDeclaredField(fieldName).apply { isAccessible = true }
+            }.getOrNull() ?: continue
+            val holder = field.get(null) ?: continue
+            return runCatching { Reflect.on(holder).call("b").get() }.getOrNull() ?: holder
+        }
+        return null
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -441,7 +525,7 @@ object BookApi {
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun isLogin(): Boolean = try {
-        Reflect.onClass("com.dragon.read.user.AcctManager").call("P")
+        Reflect.onClass("com.dragon.read.user.AcctManager").call("g")
             .call("islogin").getBoolean()
     } catch (t: Throwable) {
         false
@@ -449,7 +533,7 @@ object BookApi {
 
     private fun getUserId(): String = try {
         if (!isLogin()) "0"
-        else Reflect.onClass("com.dragon.read.user.AcctManager").call("P")
+        else Reflect.onClass("com.dragon.read.user.AcctManager").call("g")
             .call("getUserId").get()?.toString() ?: "0"
     } catch (t: Throwable) {
         "0"
@@ -476,6 +560,7 @@ object BookApi {
             value == null -> JSONObject.NULL
             value is String || value is Boolean || value is Int ||
                 value is Long || value is Double || value is Float -> value
+            value is Short || value is Byte -> value.toInt()
             value is Enum<*> -> value.name
             value is List<*> -> org.json.JSONArray().apply {
                 value.take(200).forEach { put(toJsonValue(it, depth + 1)) }
@@ -510,6 +595,124 @@ object BookApi {
                 if (obj.length() == 0) value.toString() else obj
             }
         }
+    }
+
+    /**
+     * Diagnostic: resolve the whole decryption chain at runtime.
+     *  1. Chapter service (NsReaderServiceApi.IMPL.readerChapterService) + its decrypt method
+     *  2. Key class = decrypt method's 2nd parameter
+     *  3. DexKit: classes whose method returns the key type (the key provider)
+     *  4. Dump service / DecryptKey$a full method lists
+     *  5. DexKit: classes with static (String, int) methods (key provider candidates)
+     */
+    fun debugDecryptChain(): String {
+        val obj = JSONObject()
+
+        // 1. Chapter service instance.
+        val service = runCatching {
+            Reflect.onClass(READER_API).field("IMPL").call("readerChapterService").get()
+        }.getOrNull()
+        if (service == null) {
+            return obj.put("error", "readerChapterService 不可达").toString()
+        }
+        obj.put("serviceClass", service.javaClass.name)
+
+        // Service's full declared-method list (static + instance, ≤2 params).
+        runCatching {
+            val svcMethods = org.json.JSONArray()
+            for (m in service.javaClass.declaredMethods.sortedBy { it.name }) {
+                if (m.parameterCount > 3) continue
+                svcMethods.put(
+                    "${if (java.lang.reflect.Modifier.isStatic(m.modifiers)) "static " else ""}" +
+                        "${m.name}(${m.parameterTypes.joinToString { it.simpleName }}):${m.returnType.simpleName}"
+                )
+            }
+            obj.put("serviceDeclaredMethods", svcMethods)
+        }
+
+        // Decrypt method: 5 params (String, key, boolean, String, String) → String.
+        val decryptMethod = service.javaClass.methods.firstOrNull { m ->
+            m.parameterCount == 5 &&
+                m.parameterTypes[0] == java.lang.String::class.java &&
+                m.parameterTypes[2] == java.lang.Boolean.TYPE &&
+                m.parameterTypes[3] == java.lang.String::class.java &&
+                m.parameterTypes[4] == java.lang.String::class.java &&
+                m.returnType == java.lang.String::class.java
+        }
+        if (decryptMethod != null) {
+            obj.put("decryptMethod",
+                "${decryptMethod.name}(${decryptMethod.parameterTypes.joinToString { it.name }})")
+            obj.put("keyClass", decryptMethod.parameterTypes[1].name)
+        }
+
+        // 2. DecryptKey + its $a holder methods.
+        runCatching {
+            val dk = HookSupport.dragonLoader().loadClass(DECRYPT_KEY)
+            val dkDump = org.json.JSONArray()
+            for (m in dk.declaredMethods.sortedBy { it.name }) {
+                dkDump.put(
+                    "${if (java.lang.reflect.Modifier.isStatic(m.modifiers)) "static " else ""}" +
+                        "${m.name}(${m.parameterTypes.joinToString { it.simpleName }}):${m.returnType.simpleName}"
+                )
+            }
+            obj.put("decryptKeyMethods", dkDump)
+        }
+        runCatching {
+            val holder = HookSupport.dragonLoader().loadClass("$DECRYPT_KEY\$a")
+            val hDump = org.json.JSONArray()
+            for (m in holder.declaredMethods.sortedBy { it.name }) {
+                hDump.put(
+                    "${if (java.lang.reflect.Modifier.isStatic(m.modifiers)) "static " else ""}" +
+                        "${m.name}(${m.parameterTypes.joinToString { it.simpleName }}):${m.returnType.simpleName}"
+                )
+            }
+            obj.put("holderMethods", hDump)
+        }
+
+        // 3. DexKit: classes with static (String, int) → Rx — key provider candidates.
+        val candidates = HookSupport.classResolver?.findClassesByMethodSignature(
+            paramTypeNames = listOf("java.lang.String", "int"),
+            maxResults = 30,
+        ) ?: emptyList()
+        val providerDetail = JSONObject()
+        for (p in candidates) {
+            runCatching {
+                val cls = HookSupport.dragonLoader().loadClass(p)
+                // 只保留同时具备 (String,int)→Rx 和 (String)→数字 的类（密钥提供者特征）。
+                val hasKeyGet = cls.declaredMethods.any { m ->
+                    java.lang.reflect.Modifier.isStatic(m.modifiers) &&
+                        m.parameterCount == 2 &&
+                        m.parameterTypes[0] == java.lang.String::class.java &&
+                        m.parameterTypes[1] == java.lang.Integer.TYPE &&
+                        isRxType(m.returnType)
+                }
+                val hasKeyTs = cls.declaredMethods.any { m ->
+                    java.lang.reflect.Modifier.isStatic(m.modifiers) &&
+                        m.parameterCount == 1 &&
+                        m.parameterTypes[0] == java.lang.String::class.java &&
+                        (m.returnType == java.lang.Integer.TYPE || m.returnType == java.lang.Short.TYPE)
+                }
+                if (hasKeyGet) {
+                    val methods = org.json.JSONArray()
+                    for (m in cls.declaredMethods.sortedBy { it.name }) {
+                        if (m.parameterCount > 2) continue
+                        methods.put(
+                            "${if (java.lang.reflect.Modifier.isStatic(m.modifiers)) "static " else ""}" +
+                                "${m.name}(${m.parameterTypes.joinToString { it.simpleName }}):${m.returnType.simpleName}"
+                        )
+                    }
+                    providerDetail.put(p + if (hasKeyTs) " [+ts]" else "", methods)
+                }
+            }
+        }
+        obj.put("keyProviders", providerDetail)
+
+        // 4. Chapter service reachability.
+        obj.put("chapterService", runCatching {
+            chapterService()?.javaClass?.name ?: "null"
+        }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" })
+
+        return obj.toString()
     }
 
     /** Diagnostic: dump class structure (dev endpoint). */

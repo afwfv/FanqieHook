@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#F0876F</color>
+
+    <!-- ── Soft UI 基础色板 ─────────────────────────────── -->
+    <!-- 表面色 = 背景色：新拟物的核心，靠双阴影塑造体积 -->
+    <color name="soft_bg_top">#F0F2F7</color>
+    <color name="soft_bg_bottom">#E3E7EF</color>
+    <color name="soft_surface">#E9ECF3</color>
+    <color name="soft_surface_deep">#E0E4ED</color>
+    <color name="soft_shadow_light">#FDFEFF</color>
+    <color name="soft_shadow_dark">#BEC4D3</color>
+
+    <!-- 主操作色：柔和珊瑚 -->
+    <color name="accent">#F0876F</color>
+    <color name="accent_deep">#E06A50</color>
+    <color name="accent_soft">#F5A794</color>
+
+    <!-- 文字 -->
+    <color name="text_primary">#46505E</color>
+    <color name="text_secondary">#8C95A6</color>
+
+    <!-- LED -->
+    <color name="led_on">#5CD6A9</color>
+    <color name="led_off">#C3C9D6</color>
+
+    <!-- 分组软色（代码引用） -->
+    <color name="plate_vip">#F0876F</color>
+    <color name="plate_defense">#7B9EF0</color>
+    <color name="plate_clean">#57C48F</color>
+    <color name="plate_book">#9B85E8</color>
+</resources>

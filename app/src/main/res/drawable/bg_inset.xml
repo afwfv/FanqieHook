@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 新拟物凹陷容器（状态卡）：左上暗 + 右下亮，阴影方向与凸起相反 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 暗阴影（左上露出） -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="18dp" />
+            <solid android:color="@color/soft_shadow_dark" />
+        </shape>
+    </item>
+    <!-- 亮阴影（右下露出） -->
+    <item android:left="2dp" android:top="2dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="16dp" />
+            <solid android:color="@color/soft_shadow_light" />
+        </shape>
+    </item>
+    <!-- 表面：比背景略深，强化下沉感 -->
+    <item android:left="2dp" android:top="2dp" android:right="2dp" android:bottom="2dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="16dp" />
+            <solid android:color="@color/soft_surface_deep" />
+        </shape>
+    </item>
+</layer-list>

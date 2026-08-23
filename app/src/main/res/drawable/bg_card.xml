@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 新拟物凸起卡片：左上亮阴影 + 右下暗阴影 + 表面 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 亮阴影（左上露出） -->
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="22dp" />
+            <solid android:color="@color/soft_shadow_light" />
+        </shape>
+    </item>
+    <!-- 暗阴影（右下露出） -->
+    <item android:left="2dp" android:top="2dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="22dp" />
+            <solid android:color="@color/soft_shadow_dark" />
+        </shape>
+    </item>
+    <!-- 表面：四周缩进 2dp，露出双阴影形成浮雕 -->
+    <item android:left="2dp" android:top="2dp" android:right="2dp" android:bottom="2dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="20dp" />
+            <solid android:color="@color/soft_surface" />
+        </shape>
+    </item>
+</layer-list>

@@ -1,19 +1,21 @@
 package dev.operit.fanqiehook.hooks
 
 import android.view.View
-import android.view.ViewGroup
 import dev.operit.fanqiehook.config.ModuleConfig
 import dev.operit.fanqiehook.support.HookSupport
-import dev.operit.fanqiehook.support.Reflect
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 
 /**
- * UI cleanup hooks — 15 independent sub-switches, adapted from MK's UiCleanHooker.
+ * UI cleanup hooks — 14 independent sub-switches, adapted from MK's UiCleanHooker.
  *
- * Short obfuscated names (bd2.c, bf4.c0, i44.c, e44.c, o53.h0, za1.m) are
- * version-pinned for v73332 exactly like MK hard-codes them; every hook goes
- * through [HookSupport.safeHook] so a miss only logs WARN and moves on.
+ * 残留的混淆名 (i44.c, e44.c) 仍指向 APK 中真实存在的类；其余 (bd2.c / bf4.c0 /
+ * o53.h0 / bytedance pendant b$b / videoseriespost.entrance.m) 在当前版本已不存在，
+ * 相关钩子全部移除或转为稳定的 NsUtils/NsVip/NsMine/NsCommonDependImpl 兜底闸。
+ * 所有钩子走 [HookSupport.safeHook]，未命中仅 WARN 不崩。
+ *
+ * 所有钩子无条件装配；每个回调内实时读取总开关 + 子开关（[enabled]），
+ * 关闭时按原逻辑放行 —— 开关改动免重启即时生效。
  *
  * The mine-feed scene gate deserves explanation: the "我的" tab renders a
  * staggered recommendation feed (StaggeredFeedLayout). Blocking it outright
@@ -28,30 +30,35 @@ object UiCleanHooks {
     // ── View-id constants resolved lazily via resources ──────────────────────
     private var viewIdHiderInstalled = false
 
+    /** 总开关 + 子开关联合判断（回调内实时读取，免重启生效）。 */
+    private inline fun enabled(sub: () -> Boolean): Boolean =
+        ModuleConfig.uiClean() && sub()
+
     fun installAll() {
-        if (!ModuleConfig.uiClean()) return
-        if (ModuleConfig.uiCleanSearchWord()) hookSearchWordHint()
-        if (ModuleConfig.uiCleanScreenAd()) hookScreenAd()
-        if (ModuleConfig.uiCleanVipCard()) hookVipCard()
-        if (ModuleConfig.uiCleanFunctionBadge()) hookFunctionBadge()
-        if (ModuleConfig.uiCleanMiniGame()) hookMiniGame()
-        if (ModuleConfig.uiCleanTabBadge()) hookTabBadge()
-        if (ModuleConfig.uiCleanMineFeed()) hookMineFeed()
-        if (ModuleConfig.uiCleanHomeEarnTab() || ModuleConfig.uiCleanHomeSeriesTab()) hookHomeTabBar()
-        if (ModuleConfig.uiCleanHidePublish()) hookPublishButton()
-        if (ModuleConfig.uiCleanHideMineAsset()) hookMineAsset()
-        if (ModuleConfig.uiCleanHideMineHistory()) hookMineHistory()
-        if (ModuleConfig.uiCleanHideMineEarnPendant()) hookMineEarnPendant()
-        if (ModuleConfig.uiCleanSearchResult()) hookSearchResult()
-        if (ModuleConfig.uiCleanSearchAi()) hookSearchAi()
+        hookSearchWordHint()
+        hookScreenAd()
+        hookVipCard()
+        hookFunctionBadge()
+        hookMiniGame()
+        hookTabBadge()
+        hookMineFeed()
+        hookHomeTabBar()
+        hookPublishButton()
+        hookMineAsset()
+        hookMineHistory()
+        hookMineEarnPendant()
+        hookSearchResult()
+        hookSearchAi()
     }
 
     // ── 1. 搜索框轮播提示词 ───────────────────────────────────────────────────
 
     private fun hookSearchWordHint() {
+        // dex 73332: 真实方法 f/h/e(List)V，d(List) 已不存在；改用 f 替代 d。
         val cls = "com.dragon.read.kmp.bookmall.search.SearchWordDisplayViewKMP"
-        for (m in listOf("d", "e", "h")) {
+        for (m in listOf("f", "e", "h")) {
             HookSupport.safeHook(TAG, cls, m, arrayOf("java.util.List"), "搜索轮播词-$m") { chain ->
+                if (!enabled(ModuleConfig::uiCleanSearchWord)) return@safeHook chain.proceed()
                 val args = chain.args.toTypedArray()
                 if (args.isNotEmpty()) args[0] = ArrayList<Any>()
                 chain.proceed(args)
@@ -62,80 +69,65 @@ object UiCleanHooks {
     // ── 2. 全屏弹窗广告 ───────────────────────────────────────────────────────
 
     private fun hookScreenAd() {
-        // Obfuscated manager bd2.c — three entry gates.
-        val mgr = "bd2.c"
-        HookSupport.safeHook(TAG, mgr, "b", null, "全屏广告-b") { false }
-        HookSupport.safeHook(TAG, mgr, "c", null, "全屏广告-c") { null }
-        HookSupport.safeHook(TAG, mgr, "onScreenAdDialogShow", null, "全屏广告-dialog") { false }
-
-        // Root gates on the stable-named classes.
-        HookSupport.safeHook(TAG, "com.dragon.read.msg.ScreenAdManager", "canShowScreenAd",
-            arrayOf("java.lang.Object"), "全屏广告-根闸") { false }
+        // NsUtilsDependImpl.canShowScreenAd(Object)Z → false 即可拦截全屏弹窗广告。
+        // 旧版本中的 bd2.c (Function1 lambda) 和 com.dragon.read.msg.ScreenAdManager
+        // 在当前 APK 已不存在/结构变化，相关钩子移除。
         HookSupport.safeHook(TAG, "com.dragon.read.component.NsUtilsDependImpl", "canShowScreenAd",
-            arrayOf("java.lang.Object"), "全屏广告-依赖闸") { false }
+            arrayOf("java.lang.Object"), "全屏广告-依赖闸") { chain ->
+                if (enabled(ModuleConfig::uiCleanScreenAd)) false else chain.proceed()
+            }
+        HookSupport.safeHook(TAG, "com.dragon.read.component.NsUtilsDependImpl",
+            "onScreenAdDialogShow",
+            arrayOf("android.app.Activity", "android.app.Dialog"),
+            "全屏广告-依赖闸-dialog") { chain ->
+                if (enabled(ModuleConfig::uiCleanScreenAd)) false else chain.proceed()
+            }
     }
 
     // ── 3. 会员卡 ────────────────────────────────────────────────────────────
 
     private fun hookVipCard() {
+        // NsVipImpl.isDisableVipInGoogle=true → 全局禁会员卡入口。
+        // 旧版本有 FanqieMineFragmentV2#oh 钩子，但当前 APK 已无此方法，故移除。
         HookSupport.safeHook(TAG, "com.dragon.read.component.biz.impl.NsVipImpl",
-            "isDisableVipInGoogle", null, "会员卡-禁用开关") { true }
-        HookSupport.safeHook(TAG, "com.dragon.read.component.biz.impl.mine.FanqieMineFragmentV2",
-            "oh", null, "会员卡-跳过构建") { null }
+            "isDisableVipInGoogle", null, "会员卡-禁用开关") { chain ->
+                if (enabled(ModuleConfig::uiCleanVipCard)) true else chain.proceed()
+            }
     }
 
     // ── 4. 功能区红点角标 ─────────────────────────────────────────────────────
 
     private fun hookFunctionBadge() {
-        // Sidebar item ctor: 6th param (hasRedDot) forced false.
-        HookSupport.safeHookCtor(TAG, "i44.c",
-            arrayOf("int", "java.lang.String", "java.lang.String",
-                "java.lang.String", "java.lang.String", "boolean"),
-            "功能区角标-构造器"
-        ) { chain ->
-            val args = chain.args.toTypedArray()
-            if (args.size >= 6) args[5] = false
-            chain.proceed(args)
-        }
-        HookSupport.safeHook(TAG, "i44.c", "f", null, "功能区角标-f") { false }
+        // dex 73332: i44.c 类名仍存在但已重构为 Kotlin Function1 lambda (只有 invoke(Object)Object)，
+        // 原 6-arg 业务构造器与 f() 方法均已消失；红点角标改由下方 3 个稳定钩子兜底：
+        //   MineRedDotManager#d(boolean) / #e(String) 与 NsMineImpl#enableShowRedDot(String)。
         HookSupport.safeHook(TAG, "com.dragon.read.component.biz.impl.mine.reddot.MineRedDotManager",
-            "l", arrayOf("boolean"), "我的角标-l") { false }
+            "d", arrayOf("boolean"), "我的角标-d") { chain ->
+                if (enabled(ModuleConfig::uiCleanFunctionBadge)) false else chain.proceed()
+            }
         HookSupport.safeHook(TAG, "com.dragon.read.component.biz.impl.mine.reddot.MineRedDotManager",
-            "m", arrayOf("java.lang.String"), "我的角标-m") { false }
+            "e", arrayOf("java.lang.String"), "我的角标-e") { chain ->
+                if (enabled(ModuleConfig::uiCleanFunctionBadge)) false else chain.proceed()
+            }
         HookSupport.safeHook(TAG, "com.dragon.read.component.biz.impl.NsMineImpl",
-            "enableShowRedDot", arrayOf("java.lang.String"), "我的角标-总闸") { false }
+            "enableShowRedDot", arrayOf("java.lang.String"), "我的角标-总闸") { chain ->
+                if (enabled(ModuleConfig::uiCleanFunctionBadge)) false else chain.proceed()
+            }
     }
 
     // ── 5. 小游戏入口 ────────────────────────────────────────────────────────
 
     private fun hookMiniGame() {
-        HookSupport.safeHook(TAG, "e44.c", "a", null, "小游戏-禁用") { true }
+        HookSupport.safeHook(TAG, "e44.c", "a", null, "小游戏-禁用") { chain ->
+            if (enabled(ModuleConfig::uiCleanMiniGame)) true else chain.proceed()
+        }
     }
 
     // ── 6. 底部 TAB 角标 ─────────────────────────────────────────────────────
 
     private fun hookTabBadge() {
-        val c = "bf4.c0"
-        HookSupport.safeHook(TAG, c, "c0",
-            arrayOf("com.dragon.read.model.GetTabBubbleResult"), "TAB角标-缓存清零") { chain ->
-                val args = chain.args.toTypedArray()
-                val result = args.getOrNull(0)
-                if (result != null) {
-                    Reflect.on(result).set("bubbleList", emptyList<Any>())
-                }
-                chain.proceed(args)
-            }
-        HookSupport.safeHook(TAG, c, "h0",
-            arrayOf("java.lang.String", "com.dragon.read.model.GetTabBubbleResp"), "TAB角标-回包丢弃") { null }
-        HookSupport.safeHook(TAG, c, "F0",
-            arrayOf("db5.h", "java.lang.String"), "TAB角标-总闸F0") { null }
-        HookSupport.safeHook(TAG, c, "g0", arrayOf("java.lang.String"), "TAB角标-g0") { null }
-        HookSupport.safeHook(TAG, c, "l0", arrayOf("java.lang.String"), "TAB角标-l0") { null }
-        HookSupport.safeHook(TAG, c, "G0",
-            arrayOf("android.app.Activity", "th4.d3", "com.dragon.read.model.TabBubble"),
-            "TAB角标-单点否决") { false }
-        HookSupport.safeHook(TAG, c, "T",
-            arrayOf("com.dragon.read.model.TabBubble"), "TAB角标-T判定") { false }
+        // 旧版本的 bf4.c0 类在当前 APK 已不存在，6 个钩子全部移除。
+        // 底部 TAB 角标改由 hookFunctionBadge 中 NsMineImpl.enableShowRedDot 兜底。
     }
 
     // ── 7. 我的页推荐 feed（场景闸） ─────────────────────────────────────────
@@ -147,26 +139,28 @@ object UiCleanHooks {
     private fun hookMineFeed() {
         val layout = "com.dragon.read.component.biz.impl.bookmall.holder.staggeredinfinite.container.StaggeredFeedLayout"
 
-        // Load / request entries matched by name+paramCount (signatures drift).
+        // dex 73332: 真实方法是 A(List)V / n(List)V（数据下发）与 g/h(s05.z, s05.y)V（回调）；
+        // 原 q/b/e(List) 方法已不存在。
         HookSupport.hookByName(TAG, layout, "g", 2, "我的feed-主入口g") { chain ->
             feedSceneGate(chain)
         }
-        HookSupport.hookByName(TAG, layout, "q", 2, "我的feed-请求q") { chain ->
+        HookSupport.hookByName(TAG, layout, "h", 2, "我的feed-回调h") { chain ->
             feedSceneGate(chain)
         }
-        HookSupport.safeHook(TAG, layout, "b", arrayOf("java.util.List"), "我的feed-场景闸b") { chain ->
+        HookSupport.safeHook(TAG, layout, "A", arrayOf("java.util.List"), "我的feed-数据下发A") { chain ->
             feedSceneGate(chain)
         }
-        HookSupport.safeHook(TAG, layout, "e", arrayOf("java.util.List"), "我的feed-场景闸e") { chain ->
+        HookSupport.safeHook(TAG, layout, "n", arrayOf("java.util.List"), "我的feed-数据下发n") { chain ->
             feedSceneGate(chain)
         }
 
         // KMP variant (newer feed implementation).
+        // dex 73332: 真实方法是 n(List,Z)V / o(List,Z)V；原 b(List) / F/5参 已不存在。
         val vm = "com.dragon.read.kmp.common_feed.staggeredfeed.StaggeredFeedLayoutViewModel"
-        HookSupport.safeHook(TAG, vm, "b", arrayOf("java.util.List"), "我的feed-KMP闸b") { chain ->
+        HookSupport.safeHook(TAG, vm, "n", arrayOf("java.util.List", "boolean"), "我的feed-KMP闸n") { chain ->
             kmpFeedSceneGate(chain)
         }
-        HookSupport.hookByName(TAG, vm, "F", 5, "我的feed-KMP下发F") { chain ->
+        HookSupport.safeHook(TAG, vm, "o", arrayOf("java.util.List", "boolean"), "我的feed-KMP闸o") { chain ->
             kmpFeedSceneGate(chain)
         }
     }
@@ -176,6 +170,7 @@ object UiCleanHooks {
      * show the "no content" state instead of loading the feed.
      */
     private fun feedSceneGate(chain: io.github.libxposed.api.XposedInterface.Chain): Any? {
+        if (!enabled(ModuleConfig::uiCleanMineFeed)) return chain.proceed()
         return try {
             val target = chain.thisObject ?: chain.args.getOrNull(0)
                 ?: return chain.proceed()
@@ -192,6 +187,7 @@ object UiCleanHooks {
     }
 
     private fun kmpFeedSceneGate(chain: io.github.libxposed.api.XposedInterface.Chain): Any? {
+        if (!enabled(ModuleConfig::uiCleanMineFeed)) return chain.proceed()
         return try {
             val target = chain.thisObject ?: chain.args.getOrNull(0)
                 ?: return chain.proceed()
@@ -257,38 +253,93 @@ object UiCleanHooks {
 
     // ── 8. 主页底部导航 tab 过滤 ─────────────────────────────────────────────
 
-    private fun hookHomeTabBar() {
-        val blockEarn = ModuleConfig.uiCleanHomeEarnTab()
-        val blockSeries = ModuleConfig.uiCleanHomeSeriesTab()
+    /** 赚钱 tab 资源 id（aot），懒解析。 */
+    private var tabEarnId = 0
 
+    /** 短剧 tab 资源 id（aou），懒解析。 */
+    private var tabSeriesId = 0
+
+    private fun hookHomeTabBar() {
         val depend = "com.dragon.read.component.NsCommonDependImpl"
         HookSupport.safeHook(TAG, depend, "getMainTabBarItems", null, "主页tab-类型过滤") { chain ->
             val result = chain.proceed()
-            if (result is List<*>) filterTabTypes(result, blockEarn, blockSeries) else result
+            val blockEarn = enabled(ModuleConfig::uiCleanHomeEarnTab)
+            val blockSeries = enabled(ModuleConfig::uiCleanHomeSeriesTab)
+            if (result is List<*> && (blockEarn || blockSeries)) {
+                filterTabTypes(result, blockEarn, blockSeries)
+            } else {
+                result
+            }
         }
         HookSupport.safeHook(TAG, depend, "getBottomTabBarItemDataList", null, "主页tab-数据过滤") { chain ->
             val result = chain.proceed()
-            if (result is List<*>) filterTabData(result, blockEarn, blockSeries) else result
+            val blockEarn = enabled(ModuleConfig::uiCleanHomeEarnTab)
+            val blockSeries = enabled(ModuleConfig::uiCleanHomeSeriesTab)
+            if (result is List<*> && (blockEarn || blockSeries)) {
+                filterTabData(result, blockEarn, blockSeries)
+            } else {
+                result
+            }
         }
 
-        HookSupport.safeHook(TAG, "com.dragon.read.pages.main.u2", "z", null, "主页tab-渲染源z") { chain ->
+        // View 层隐藏：BottomTabBarLayout 绑定 tab 时，比对资源 id 直接 GONE。
+        // dex 73332: 只有 U1(v37/g)V 与 V1(v37/g;ZZ)V 两个虚拟方法，O1 已不存在。
+        val tabLayout = "com.dragon.read.widget.BottomTabBarLayout"
+        HookSupport.hookByName(TAG, tabLayout, "U1", 1, "主页tab-view层隐藏U1") { chain ->
             val result = chain.proceed()
-            if (result is List<*>) filterTabTypes(result, blockEarn, blockSeries) else result
+            hideTabViewIfNeeded(chain.args.getOrNull(0))
+            result
         }
-        HookSupport.safeHook(TAG, "com.dragon.read.pages.main.u2", "m", null, "主页tab-渲染源m") { chain ->
+        // 3 参变体（V1(g, boolean, boolean)）同样走 view 隐藏。
+        HookSupport.hookByName(TAG, tabLayout, "V1", 3, "主页tab-view层隐藏V1") { chain ->
             val result = chain.proceed()
-            if (result is List<*>) filterTabData(result, blockEarn, blockSeries) else result
+            hideTabViewIfNeeded(chain.args.getOrNull(0))
+            result
         }
     }
 
-    private fun filterTabTypes(list: List<*>, blockEarn: Boolean, blockSeries: Boolean): List<*> =
-        list.filter { item ->
+    /** holder.getView() → 比对 aot/aou 资源 id → GONE（MK 的 view 层隐藏逻辑）。 */
+    private fun hideTabViewIfNeeded(holder: Any?) {
+        if (holder == null) return
+        val blockEarn = enabled(ModuleConfig::uiCleanHomeEarnTab)
+        val blockSeries = enabled(ModuleConfig::uiCleanHomeSeriesTab)
+        if (!blockEarn && !blockSeries) return
+        try {
+            val view = holder.javaClass.getMethod("getView").invoke(holder) as? View ?: return
+            if (tabEarnId == 0 || tabSeriesId == 0) {
+                val res = view.resources
+                tabEarnId = res.getIdentifier("aot", "id", "com.dragon.read")
+                tabSeriesId = res.getIdentifier("aou", "id", "com.dragon.read")
+            }
+            val shouldHide =
+                (blockEarn && tabEarnId != 0 && view.id == tabEarnId) ||
+                    (blockSeries && tabSeriesId != 0 && view.id == tabSeriesId)
+            if (shouldHide && view.visibility != View.GONE) {
+                view.visibility = View.GONE
+            }
+        } catch (ignored: Throwable) {
+        }
+    }
+
+    private fun filterTabTypes(list: List<*>, blockEarn: Boolean, blockSeries: Boolean): List<*> {
+        // 诊断：打印当前 tab 枚举名，便于核对过滤目标是否漂移。
+        val names = list.mapNotNull { (it as? Enum<*>)?.name }
+        if (names.isNotEmpty()) HookSupport.log?.info("[$TAG] 主页tab枚举: $names")
+        return list.filter { item ->
             val name = (item as? Enum<*>)?.name ?: return@filter true
             !(blockedTab(name, blockEarn, blockSeries))
         }
+    }
 
-    private fun filterTabData(list: List<*>, blockEarn: Boolean, blockSeries: Boolean): List<*> =
-        list.filter { item ->
+    private fun filterTabData(list: List<*>, blockEarn: Boolean, blockSeries: Boolean): List<*> {
+        val names = mutableListOf<String>()
+        for (item in list) {
+            if (item == null) continue
+            val type = tryOrNull { item.javaClass.getField("tabType").get(item) }
+            (type as? Enum<*>)?.name?.let { names.add(it) }
+        }
+        if (names.isNotEmpty()) HookSupport.log?.info("[$TAG] 主页tab数据: $names")
+        return list.filter { item ->
             if (item == null) return@filter true
             val type = tryOrNull {
                 item.javaClass.getField("tabType").get(item)
@@ -296,6 +347,7 @@ object UiCleanHooks {
             val name = (type as? Enum<*>)?.name ?: return@filter true
             !blockedTab(name, blockEarn, blockSeries)
         }
+    }
 
     private fun blockedTab(name: String, blockEarn: Boolean, blockSeries: Boolean): Boolean =
         (blockEarn && name == "LuckyBenefit") || (blockSeries && name == "VideoSeriesFeedTab")
@@ -303,33 +355,34 @@ object UiCleanHooks {
     // ── 9. 发表按钮 ──────────────────────────────────────────────────────────
 
     private fun hookPublishButton() {
-        val cls = "com.dragon.read.component.biz.impl.bookmall.videoseriespost.entrance.m"
-        HookSupport.safeHook(TAG, cls, "onAttachedToWindow", null, "发表按钮-attach后GONE") { chain ->
-            val result = chain.proceed()
-            (chain.thisObject as? View)?.let { v ->
-                if (v.visibility != View.GONE) v.visibility = View.GONE
-            }
-            result
-        }
-        HookSupport.safeHook(TAG, cls, "isShown", null, "发表按钮-isShown=false") { false }
+        // 旧版本的 com.dragon.read.component.biz.impl.bookmall.videoseriespost.entrance.m
+        // 类在当前 APK 已不存在，相关钩子移除。
+        // 发表按钮（创作中心入口）若需要隐藏，可改用 hookHomeTabBar 屏蔽 VideoSeriesFeedTab，
+        // 或后续找到新的入口类再加回。
     }
 
     // ── 10. 我的页金币信息 ───────────────────────────────────────────────────
 
     private fun hookMineAsset() {
+        // VariantMineFragment.qg()Z (PUBLIC STATIC) 返回是否显示金币信息；
+        // 关闭开关时返 false 即可隐藏。
         HookSupport.safeHook(TAG, "com.dragon.read.component.biz.impl.mine.VariantMineFragment",
-            "qg", null, "金币信息-跳过") { null }
+            "qg", null, "金币信息-跳过") { chain ->
+                if (enabled(ModuleConfig::uiCleanHideMineAsset)) false else chain.proceed()
+            }
     }
 
     // ── 11. 我的页浏览历史卡 ─────────────────────────────────────────────────
 
     private fun hookMineHistory() {
-        HookSupport.safeHook(TAG, "o53.h0", "r", arrayOf(), "历史卡-外露条总闸") { false }
+        // 旧版本的 o53.h0.r 和 MineHistoryCard#V(boolean) 在当前 APK 已不存在，移除。
+        // handleInsertHistoryCard 参数类型从 o53.z 修正为 g44.a0 (dexdump 验证)。
 
         HookSupport.safeHook(TAG,
             "com.dragon.read.component.biz.impl.mine.highfreq.history.BasicExperienceCardProvider",
             "parseModel", arrayOf("com.dragon.read.rpc.model.CellViewData"),
             "历史卡-服务端卡拦截") { chain ->
+                if (!enabled(ModuleConfig::uiCleanHideMineHistory)) return@safeHook chain.proceed()
                 val arg0 = chain.args.getOrNull(0)
                 val groupType = tryOrNull {
                     arg0?.javaClass?.getField("groupIdType")?.get(arg0)
@@ -342,13 +395,8 @@ object UiCleanHooks {
             }
 
         HookSupport.safeHook(TAG, "com.dragon.read.component.biz.impl.mine.FanqieMineFragmentV2",
-            "handleInsertHistoryCard", arrayOf("o53.z"), "历史卡-跳过插入") { null }
-
-        HookSupport.safeHook(TAG, "com.dragon.read.component.biz.impl.mine.card.model.MineHistoryCard",
-            "V", arrayOf("boolean"), "历史卡-强制隐藏V") { chain ->
-                val args = chain.args.toTypedArray()
-                if (args.isNotEmpty() && args[0] == true) args[0] = false
-                chain.proceed(args)
+            "handleInsertHistoryCard", arrayOf("g44.a0"), "历史卡-跳过插入") { chain ->
+                if (enabled(ModuleConfig::uiCleanHideMineHistory)) null else chain.proceed()
             }
 
         // Ctor: after construction, force the card's root view GONE.
@@ -356,6 +404,7 @@ object UiCleanHooks {
             "com.dragon.read.component.biz.impl.mine.card.model.MineHistoryCard",
             arrayOf("com.dragon.read.base.AbsFragment"), "历史卡-构造后GONE") { chain ->
                 val result = chain.proceed()
+                if (!enabled(ModuleConfig::uiCleanHideMineHistory)) return@safeHookCtor result
                 try {
                     val card = chain.thisObject
                     val view = card.javaClass.getMethod("h").invoke(card) as? View
@@ -369,40 +418,61 @@ object UiCleanHooks {
     // ── 12. 赚钱挂件 ─────────────────────────────────────────────────────────
 
     private fun hookMineEarnPendant() {
-        HookSupport.safeHook(TAG, "com.bytedance.ug.sdk.novel.pendant.manager.b\$b",
-            "run", null, "赚钱挂件-禁用创建") { null }
+        // 旧版本的 com.bytedance.ug.sdk.novel.pendant.manager.b$b 类在当前 APK 已不存在，钩子移除。
     }
 
     // ── 13. 搜索结果卡片清理 ─────────────────────────────────────────────────
 
     private fun hookSearchResult() {
-        val cls = "com.dragon.read.component.biz.impl.help.z"
-        val param = arrayOf("com.dragon.read.rpc.model.CellViewData")
-        for (m in listOf("S", "M", "I", "R", "T")) {
-            HookSupport.safeHook(TAG, cls, m, param, "搜索结果清理-$m") { null }
+        // dex 73332: help.z#S/M/I/R/T 已消失；5 个搜索结果卡解析方法迁移到 3 个 BrickService
+        // (V1/V2/V3) 的 parseRoot(CellViewData)AbsSearchModel。3 个都是 Kotlin 接口，
+        // 实际实现类为同名 $Companion$IMPL$1 单例，钩在实现类上才能真正拦截。
+        val cellData = "com.dragon.read.rpc.model.CellViewData"
+        val pkg = "com.dragon.read.component.biz.brickservice"
+        for (ver in listOf("V1", "V2", "V3")) {
+            val implCls = "$pkg.SearchSeriesCard${ver}BrickService\$Companion\$IMPL\$1"
+            HookSupport.safeHook(TAG, implCls, "parseRoot", arrayOf(cellData), "搜索结果清理-${ver}-parseRoot") { chain ->
+                if (enabled(ModuleConfig::uiCleanSearchResult)) null else chain.proceed()
+            }
         }
     }
 
     // ── 14. AI 入口 ──────────────────────────────────────────────────────────
 
     private fun hookSearchAi() {
-        val cls = "com.dragon.read.component.biz.impl.SearchActivity"
-        for (m in listOf("G3", "H3", "I3")) {
-            HookSupport.safeHook(TAG, cls, m, null, "AI入口-$m") { false }
-        }
-        // Static factories returning "enabled" config: replace with default instances.
-        hookStaticFactory("com.dragon.read.base.ssconfig.template.SearchResultPageAiFloatButton")
-        hookStaticFactory("com.dragon.read.base.ssconfig.template.SearchPageAiEntranceV675")
+        // SearchActivity 没有 G3/H3/I3，这些方法属于 holder/k2，不是搜索入口。
+        // 真正的 AI 入口由 SearchPageAiEntranceV675 / SearchResultPageAiFloatButton
+        // 这两个 Kotlin object 的构造器决定（entryInBanner / entryInSearchBox / hideSearchBarButton / showFloatButton）。
+        // 通过挂钩构造器并强制传入 false，让两个 AI 入口都不显示。
+        replaceAiConfigWithDefault(
+            "com.dragon.read.base.ssconfig.template.SearchResultPageAiFloatButton",
+            arrayOf("boolean", "boolean")
+        )
+        replaceAiConfigWithDefault(
+            "com.dragon.read.base.ssconfig.template.SearchPageAiEntranceV675",
+            arrayOf("boolean", "boolean")
+        )
     }
 
-    private fun hookStaticFactory(className: String) {
-        HookSupport.safeHook(TAG, className, "b", null, "AI静态工厂") { _ ->
-            try {
-                val cls = HookSupport.dragonLoader().loadClass(className)
-                cls.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
-            } catch (t: Throwable) {
-                null
+    /**
+     * Hook 构造器，强制 (false, false) 实例，绕过 SSConfig 默认值。
+     * SearchResultPageAiFloatButton: hideSearchBarButton=false, showFloatButton=false
+     * SearchPageAiEntranceV675:       entryInBanner=false,    entryInSearchBox=false
+     */
+    private fun replaceAiConfigWithDefault(className: String, params: Array<String>) {
+        HookSupport.safeHookCtor(TAG, className, params, "AI静态配置-构造器") { chain ->
+            if (!enabled(ModuleConfig::uiCleanSearchAi)) return@safeHookCtor chain.proceed()
+            val args = chain.args.toTypedArray()
+            // 把所有 boolean 参数置 false（两个类的字段语义都是“是否显示/启用”）。
+            for (i in args.indices) {
+                if (args[i] is Boolean) args[i] = false
             }
+            chain.proceed(args)
+        }
+        // 兜底：无参构造器（Kotlin object 风格 <init>()V）也会被调用，直接返回零值实例。
+        HookSupport.safeHookCtor(TAG, className, arrayOf(), "AI静态配置-无参构造") { chain ->
+            if (!enabled(ModuleConfig::uiCleanSearchAi)) return@safeHookCtor chain.proceed()
+            null
         }
     }
 

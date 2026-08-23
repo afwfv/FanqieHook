@@ -3,23 +3,20 @@ package dev.operit.fanqiehook.config
 import android.content.SharedPreferences
 
 /**
- * Unified feature-switch registry, adapted from the MK module's ConfigManager pattern.
+ * 功能开关注册表 —— 宿主进程配置源。
  *
- * Preference resolution order (mirrors MK):
- *   1. [prefs] — libxposed `getRemotePreferences("fanqiehook")`: values saved by the module's
- *      own app UI propagate to the injected host process in real time.
- *   2. Host-process SP `fanqiehook` — fallback when the module app never saved anything
- *      (framework lacks service support or user only flipped switches via the web console).
- *   3. [EMPTY] — read-only zeros; every feature gate defaults to its declared default.
+ * 配置流向（单一写入方）：
+ *   模块 App UI → XposedService.getRemotePreferences → 框架共享存储
+ *     → 宿主 XposedInterface.getRemotePreferences 实时读取
  *
- * All new feature gates default to OFF so behaviour stays identical to v0.2.0 unless the
- * user explicitly enables them. The ad-blocking hooks (AdHooks) remain unconditional.
+ * 读取按调用实时进行（Hook 回调内判断），开关改动免重启即时生效。
+ * 所有功能默认关闭，保证安装后行为与用户预期一致。
  */
 object ModuleConfig {
 
     const val SP_NAME = "fanqiehook"
 
-    /** Read-only no-op preferences used when neither remote nor host SP is reachable. */
+    /** 只读空实现：配置源不可用时兜底。 */
     private val EMPTY: SharedPreferences = object : SharedPreferences {
         override fun getAll(): Map<String, *> = emptyMap<String, Any>()
         override fun getString(key: String, defValue: String?): String? = defValue
@@ -32,149 +29,85 @@ object ModuleConfig {
         override fun edit(): SharedPreferences.Editor =
             throw UnsupportedOperationException("EMPTY preferences are read-only")
         override fun registerOnSharedPreferenceChangeListener(
-            listener: SharedPreferences.OnSharedPreferenceChangeListener
+            listener: SharedPreferences.OnSharedPreferenceChangeListener,
         ) = Unit
         override fun unregisterOnSharedPreferenceChangeListener(
-            listener: SharedPreferences.OnSharedPreferenceChangeListener
+            listener: SharedPreferences.OnSharedPreferenceChangeListener,
         ) = Unit
     }
 
     @Volatile
-    private var prefsSource: SharedPreferences? = null
-
-    /** Writable view used by the web console (host-process SP). */
-    @Volatile
-    var writablePrefs: SharedPreferences? = null
-        private set
+    private var remotePrefs: SharedPreferences? = null
 
     /**
-     * Bind the preference sources. Called once from [dev.operit.fanqiehook.FanqieModule]
-     * when the host application is ready.
+     * 绑定配置源。宿主 Application 就绪后调用一次。
      *
-     * Priority: host-process SP first (it is the write target of the web console, and
-     * this module ships without a settings UI, so the console IS the primary entry);
-     * remote prefs (module app, if ever added) only when the host SP is empty.
-     *
-     * @param remote libxposed remote preferences (module app's saved config), may be null.
-     * @param hostWritable host-process SP, writable; used as the main source and as the
-     *   write target for the web console.
+     * @param remote 框架共享存储（模块 App 写入），唯一配置源
      */
-    fun init(remote: SharedPreferences?, hostWritable: SharedPreferences?) {
-        val hostHasData = hostWritable != null && hostWritable.all.isNotEmpty()
-        prefsSource = when {
-            hostHasData -> hostWritable
-            remote != null && remote.all.isNotEmpty() -> remote
-            else -> hostWritable ?: remote ?: EMPTY
-        }
-        writablePrefs = hostWritable
+    fun init(remote: SharedPreferences?) {
+        remotePrefs = remote
     }
 
-    private fun prefs(): SharedPreferences = prefsSource ?: EMPTY
+    private fun prefs(): SharedPreferences = remotePrefs ?: EMPTY
 
-    // ── Top-level feature gates ───────────────────────────────────────────────
+    // ── 读取接口 ──────────────────────────────────────────────────────────────
 
-    /** 本地 VIP 伪装 (UserModel / VipInfo / PrivilegeManager 全链路伪造). */
-    fun localVip(): Boolean = prefs().getBoolean(Keys.LOCAL_VIP, false)
+    /** 本地 VIP 伪装（UserModel / VipInfo / PrivilegeManager 全链路伪造）。 */
+    fun localVip(): Boolean = prefs().getBoolean(Key.LOCAL_VIP, false)
 
-    /** 激励视频秒领：跳过观看直接触发发奖回调. */
-    fun instantReward(): Boolean = prefs().getBoolean(Keys.INSTANT_REWARD, false)
+    /** 激励视频秒过：跳过观看直接触发发奖回调。 */
+    fun instantReward(): Boolean = prefs().getBoolean(Key.INSTANT_REWARD, false)
 
-    /** 阅读时长上报倍率 (1 = 关闭). */
-    fun readingTimeMultiplier(): Int = prefs().getInt(Keys.READING_TIME_MULTIPLIER, 1)
+    /** 阅读时长上报倍率（1 = 关闭）。 */
+    fun readingTimeMultiplier(): Int = prefs().getInt(Key.READING_TIME_MULTIPLIER, 1)
 
-    /** 屏蔽应用内更新检查. */
-    fun blockUpdates(): Boolean = prefs().getBoolean(Keys.BLOCK_UPDATES, false)
+    /** 拦截应用内更新检查。 */
+    fun blockUpdates(): Boolean = prefs().getBoolean(Key.BLOCK_UPDATES, false)
 
-    /** 屏蔽 Reparo 热更新. */
-    fun blockHotUpdate(): Boolean = prefs().getBoolean(Keys.BLOCK_HOT_UPDATE, false)
+    /** 拦截 Reparo 热更新。 */
+    fun blockHotUpdate(): Boolean = prefs().getBoolean(Key.BLOCK_HOT_UPDATE, false)
 
-    /** 屏蔽 Mira 插件加载. */
-    fun blockPluginLoad(): Boolean = prefs().getBoolean(Keys.BLOCK_PLUGIN_LOAD, false)
+    /** 拦截 Mira 插件加载。 */
+    fun blockPluginLoad(): Boolean = prefs().getBoolean(Key.BLOCK_PLUGIN_LOAD, false)
 
-    /** 屏蔽 Npth/CrashReport 崩溃上报. */
-    fun blockCrashReport(): Boolean = prefs().getBoolean(Keys.BLOCK_CRASH_REPORT, false)
+    /** 拦截 Npth/CrashReport 崩溃上报。 */
+    fun blockCrashReport(): Boolean = prefs().getBoolean(Key.BLOCK_CRASH_REPORT, false)
 
-    /** 解锁下架/违禁书籍 (isOverallOffShelf / isUnsafeBook → false). */
-    fun unlockBooks(): Boolean = prefs().getBoolean(Keys.UNLOCK_BOOKS, false)
+    /** 解锁下架/违禁书籍（isOverallOffShelf / isUnsafeBook → false）。 */
+    fun unlockBooks(): Boolean = prefs().getBoolean(Key.UNLOCK_BOOKS, false)
 
-    /** 界面净化总开关. */
-    fun uiClean(): Boolean = prefs().getBoolean(Keys.UI_CLEAN, false)
+    /** 界面净化总开关。 */
+    fun uiClean(): Boolean = prefs().getBoolean(Key.UI_CLEAN, false)
 
-    /** Web 控制台：随宿主启动（默认开——本模块无设置界面，控制台是唯一配置入口）. */
-    fun startWebServer(): Boolean = prefs().getBoolean(Keys.START_WEB_SERVER, true)
+    // ── 界面净化子开关 ────────────────────────────────────────────────────────
 
-    /** Web 控制台端口. */
-    fun webPort(): Int = prefs().getInt(Keys.WEB_PORT, 18765)
+    fun uiCleanSearchWord(): Boolean = prefs().getBoolean(Key.UC_SEARCH_WORD, true)
+    fun uiCleanScreenAd(): Boolean = prefs().getBoolean(Key.UC_SCREEN_AD, true)
+    fun uiCleanVipCard(): Boolean = prefs().getBoolean(Key.UC_VIP_CARD, false)
+    fun uiCleanFunctionBadge(): Boolean = prefs().getBoolean(Key.UC_FUNCTION_BADGE, true)
+    fun uiCleanMiniGame(): Boolean = prefs().getBoolean(Key.UC_MINI_GAME, true)
+    fun uiCleanTabBadge(): Boolean = prefs().getBoolean(Key.UC_TAB_BADGE, true)
+    fun uiCleanMineFeed(): Boolean = prefs().getBoolean(Key.UC_MINE_FEED, true)
+    fun uiCleanHomeEarnTab(): Boolean = prefs().getBoolean(Key.UC_HOME_EARN_TAB, true)
+    fun uiCleanHomeSeriesTab(): Boolean = prefs().getBoolean(Key.UC_HOME_SERIES_TAB, true)
+    fun uiCleanHidePublish(): Boolean = prefs().getBoolean(Key.UC_HIDE_PUBLISH, true)
+    fun uiCleanHideMineAsset(): Boolean = prefs().getBoolean(Key.UC_HIDE_MINE_ASSET, true)
+    fun uiCleanHideMineHistory(): Boolean = prefs().getBoolean(Key.UC_HIDE_MINE_HISTORY, false)
+    fun uiCleanHideMineEarnPendant(): Boolean =
+        prefs().getBoolean(Key.UC_HIDE_MINE_EARN_PENDANT, false)
+    fun uiCleanSearchResult(): Boolean = prefs().getBoolean(Key.UC_SEARCH_RESULT, true)
+    fun uiCleanSearchAi(): Boolean = prefs().getBoolean(Key.UC_SEARCH_AI, true)
 
-    // ── UI clean sub-switches (defaults mirror MK's sensible-on set) ──────────
+    // ── 书源 API ──────────────────────────────────────────────────────────────
 
-    fun uiCleanSearchWord(): Boolean = prefs().getBoolean(Keys.UC_SEARCH_WORD, true)
-    fun uiCleanScreenAd(): Boolean = prefs().getBoolean(Keys.UC_SCREEN_AD, true)
-    fun uiCleanVipCard(): Boolean = prefs().getBoolean(Keys.UC_VIP_CARD, false)
-    fun uiCleanFunctionBadge(): Boolean = prefs().getBoolean(Keys.UC_FUNCTION_BADGE, true)
-    fun uiCleanMiniGame(): Boolean = prefs().getBoolean(Keys.UC_MINI_GAME, true)
-    fun uiCleanTabBadge(): Boolean = prefs().getBoolean(Keys.UC_TAB_BADGE, true)
-    fun uiCleanMineFeed(): Boolean = prefs().getBoolean(Keys.UC_MINE_FEED, true)
-    fun uiCleanHomeEarnTab(): Boolean = prefs().getBoolean(Keys.UC_HOME_EARN_TAB, true)
-    fun uiCleanHomeSeriesTab(): Boolean = prefs().getBoolean(Keys.UC_HOME_SERIES_TAB, true)
-    fun uiCleanHidePublish(): Boolean = prefs().getBoolean(Keys.UC_HIDE_PUBLISH, true)
-    fun uiCleanHideMineAsset(): Boolean = prefs().getBoolean(Keys.UC_HIDE_MINE_ASSET, true)
-    fun uiCleanHideMineHistory(): Boolean = prefs().getBoolean(Keys.UC_HIDE_MINE_HISTORY, false)
-    fun uiCleanHideMineEarnPendant(): Boolean = prefs().getBoolean(Keys.UC_HIDE_MINE_EARN_PENDANT, false)
-    fun uiCleanSearchResult(): Boolean = prefs().getBoolean(Keys.UC_SEARCH_RESULT, true)
-    fun uiCleanSearchAi(): Boolean = prefs().getBoolean(Keys.UC_SEARCH_AI, true)
+    /** 启用进程内书源服务（Legado 兼容 API，供阅读类 App 配置书源）。 */
+    fun bookSource(): Boolean = prefs().getBoolean(Key.BOOK_SOURCE, false)
 
-    /** Snapshot of every switch, for the web console status page. */
-    fun snapshot(): Map<String, Any> = mapOf(
-        Keys.LOCAL_VIP to localVip(),
-        Keys.INSTANT_REWARD to instantReward(),
-        Keys.READING_TIME_MULTIPLIER to readingTimeMultiplier(),
-        Keys.BLOCK_UPDATES to blockUpdates(),
-        Keys.BLOCK_HOT_UPDATE to blockHotUpdate(),
-        Keys.BLOCK_PLUGIN_LOAD to blockPluginLoad(),
-        Keys.BLOCK_CRASH_REPORT to blockCrashReport(),
-        Keys.UNLOCK_BOOKS to unlockBooks(),
-        Keys.UI_CLEAN to uiClean(),
-        Keys.START_WEB_SERVER to startWebServer(),
-        Keys.WEB_PORT to webPort(),
-        Keys.UC_SEARCH_WORD to uiCleanSearchWord(),
-        Keys.UC_SCREEN_AD to uiCleanScreenAd(),
-        Keys.UC_VIP_CARD to uiCleanVipCard(),
-        Keys.UC_FUNCTION_BADGE to uiCleanFunctionBadge(),
-        Keys.UC_MINI_GAME to uiCleanMiniGame(),
-        Keys.UC_TAB_BADGE to uiCleanTabBadge(),
-        Keys.UC_MINE_FEED to uiCleanMineFeed(),
-        Keys.UC_HOME_EARN_TAB to uiCleanHomeEarnTab(),
-        Keys.UC_HOME_SERIES_TAB to uiCleanHomeSeriesTab(),
-        Keys.UC_HIDE_PUBLISH to uiCleanHidePublish(),
-        Keys.UC_HIDE_MINE_ASSET to uiCleanHideMineAsset(),
-        Keys.UC_HIDE_MINE_HISTORY to uiCleanHideMineHistory(),
-        Keys.UC_HIDE_MINE_EARN_PENDANT to uiCleanHideMineEarnPendant(),
-        Keys.UC_SEARCH_RESULT to uiCleanSearchResult(),
-        Keys.UC_SEARCH_AI to uiCleanSearchAi(),
-    )
+    /** 书源服务端口。 */
+    fun bookSourcePort(): Int = prefs().getInt(Key.BOOK_SOURCE_PORT, 18765)
 
-    /** Apply a single boolean/int override from the web console (host SP write). */
-    fun applyOverride(key: String, value: Any): Boolean {
-        val editor = writablePrefs?.edit() ?: return false
-        when (value) {
-            is Boolean -> editor.putBoolean(key, value)
-            is Int -> editor.putInt(key, value)
-            is String -> editor.putString(key, value)
-            else -> return false
-        }
-        editor.apply()
-        // Re-bind so subsequent reads see the new value even when remote prefs was the source.
-        if (prefsSource !== writablePrefs) {
-            prefsSource = writablePrefs
-        }
-        return true
-    }
-
-    /** All valid override keys (web console validation). */
-    val allKeys: Set<String> = Keys.ALL
-
-    private object Keys {
+    /** SP 键名常量。UI 与 Hook 共用，键名一处定义。 */
+    object Key {
         const val LOCAL_VIP = "local_vip"
         const val INSTANT_REWARD = "instant_reward"
         const val READING_TIME_MULTIPLIER = "reading_time_multiplier"
@@ -184,8 +117,6 @@ object ModuleConfig {
         const val BLOCK_CRASH_REPORT = "block_crash_report"
         const val UNLOCK_BOOKS = "unlock_books"
         const val UI_CLEAN = "ui_clean"
-        const val START_WEB_SERVER = "start_web_server"
-        const val WEB_PORT = "web_port"
         const val UC_SEARCH_WORD = "uc_search_word"
         const val UC_SCREEN_AD = "uc_screen_ad"
         const val UC_VIP_CARD = "uc_vip_card"
@@ -201,15 +132,7 @@ object ModuleConfig {
         const val UC_HIDE_MINE_EARN_PENDANT = "uc_hide_mine_earn_pendant"
         const val UC_SEARCH_RESULT = "uc_search_result"
         const val UC_SEARCH_AI = "uc_search_ai"
-
-        val ALL: Set<String> = setOf(
-            LOCAL_VIP, INSTANT_REWARD, READING_TIME_MULTIPLIER, BLOCK_UPDATES,
-            BLOCK_HOT_UPDATE, BLOCK_PLUGIN_LOAD, BLOCK_CRASH_REPORT, UNLOCK_BOOKS,
-            UI_CLEAN, START_WEB_SERVER, WEB_PORT,
-            UC_SEARCH_WORD, UC_SCREEN_AD, UC_VIP_CARD, UC_FUNCTION_BADGE, UC_MINI_GAME,
-            UC_TAB_BADGE, UC_MINE_FEED, UC_HOME_EARN_TAB, UC_HOME_SERIES_TAB,
-            UC_HIDE_PUBLISH, UC_HIDE_MINE_ASSET, UC_HIDE_MINE_HISTORY,
-            UC_HIDE_MINE_EARN_PENDANT, UC_SEARCH_RESULT, UC_SEARCH_AI,
-        )
+        const val BOOK_SOURCE = "book_source"
+        const val BOOK_SOURCE_PORT = "book_source_port"
     }
 }
