@@ -1,7 +1,10 @@
 package dev.operit.fanqiehook
 
+import android.os.Build
 import org.luckypray.dexkit.DexKitBridge
+import java.io.File
 import java.lang.reflect.Method
+import java.util.zip.ZipFile
 
 /**
  * Reflective class / method lookup against the host app's class loader.
@@ -36,7 +39,20 @@ class ClassResolver(
      * `PackageReadyParam.applicationInfo.sourceDir`. May be null in early lifecycle phases; in
      * that case DexKit-backed lookups degrade to reflection-only.
      */
-    private val apkPath: String? = null
+    private val apkPath: String? = null,
+    /**
+     * The MODULE's own APK path. DexKit 2.0.4 never calls `System.loadLibrary` itself (verified:
+     * no `java/lang/System` reference anywhere in its classes.jar), so inside an LSPosed-injected
+     * host process nobody loads `libdexkit.so` and every native call dies with
+     * `UnsatisfiedLinkError: No implementation found for ... nativeInitDexKit`. Supplied by
+     * [FanqieModule] from `getModuleApplicationInfo().sourceDir`.
+     */
+    private val moduleApkPath: String? = null,
+    /**
+     * Host app's data dir (writable — module code runs as the host UID). Used to extract
+     * `libdexkit.so` when `System.loadLibrary` cannot resolve the module APK's lib dir.
+     */
+    private val hostDataDir: String? = null
 ) {
 
     fun findClass(name: String): Class<*>? {
@@ -128,12 +144,17 @@ class ClassResolver(
     // ─────────────────────────────────────────────────────────────────────────
 
     private var dexKitBridge: DexKitBridge? = null
+    private var nativeLibLoaded = false
 
     private fun bridge(): DexKitBridge? {
         if (dexKitBridge == null) {
             val path = apkPath
             if (path == null) {
                 log.warn("DexKit unavailable: no apkPath supplied to ClassResolver")
+                return null
+            }
+            if (!ensureDexKitNativeLoaded()) {
+                log.warn("DexKit unavailable: native lib could not be loaded; DexKit lookups disabled")
                 return null
             }
             dexKitBridge = try {
@@ -144,6 +165,83 @@ class ClassResolver(
             }
         }
         return dexKitBridge
+    }
+
+    /**
+     * Load `libdexkit.so` before the first [DexKitBridge.create] call.
+     *
+     * DexKit 2.0.4's Java side never loads its own native library (no `System.loadLibrary`
+     * call exists in the AAR). In a normal app the host's loader setup covers it; inside an
+     * LSPosed-injected host process it does not, so every DexKit native method fails with
+     * `UnsatisfiedLinkError: No implementation found for ... nativeInitDexKit`.
+     *
+     * Strategy:
+     *  1. `System.loadLibrary("dexkit")` — works when the module classloader exposes the
+     *     module APK's `lib/<abi>/` entries (stored uncompressed).
+     *  2. Fallback: extract the matching-ABI `.so` from the module APK into the host's
+     *     `cache/fanqiehook/` and `System.load()` it by absolute path.
+     */
+    private fun ensureDexKitNativeLoaded(): Boolean {
+        if (nativeLibLoaded) return true
+
+        // Strategy 1: standard lookup through this class's classloader (the module's).
+        try {
+            System.loadLibrary("dexkit")
+            nativeLibLoaded = true
+            log.info("DexKit native lib loaded via System.loadLibrary")
+            return true
+        } catch (first: Throwable) {
+            log.debug(
+                "System.loadLibrary(dexkit) unavailable (${first.javaClass.simpleName}); " +
+                    "falling back to extraction from module APK"
+            )
+        }
+
+        // Strategy 2: extract from the module APK into a host-writable dir.
+        val moduleApk = moduleApkPath ?: run {
+            log.warn("DexKit native lib: moduleApkPath unavailable; DexKit lookups disabled")
+            return false
+        }
+        val outDir = hostDataDir?.let { File(it, "cache/fanqiehook") }?.apply { mkdirs() } ?: run {
+            log.warn("DexKit native lib: hostDataDir unavailable; DexKit lookups disabled")
+            return false
+        }
+        try {
+            ZipFile(moduleApk).use { zf ->
+                val abi = Build.SUPPORTED_ABIS.firstOrNull { zf.getEntry("lib/$it/libdexkit.so") != null }
+                if (abi == null) {
+                    log.warn(
+                        "DexKit native lib: no libdexkit.so in module APK for ABIs " +
+                            Build.SUPPORTED_ABIS.toList()
+                    )
+                    return false
+                }
+                val entry = zf.getEntry("lib/$abi/libdexkit.so")!!
+                val outFile = File(outDir, "libdexkit-$abi.so")
+                // Re-extract when missing or stale (a module update may ship a different .so).
+                if (outFile.length() != entry.size) {
+                    zf.getInputStream(entry).use { input ->
+                        outFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+                System.load(outFile.absolutePath)
+                nativeLibLoaded = true
+                log.info("DexKit native lib loaded from ${outFile.absolutePath} (abi=$abi)")
+                return true
+            }
+        } catch (ule: UnsatisfiedLinkError) {
+            // Hot-reload can re-enter with the library already mapped at the same path.
+            if (ule.message?.contains("already", ignoreCase = true) == true) {
+                nativeLibLoaded = true
+                log.info("DexKit native lib already loaded; reusing existing mapping")
+                return true
+            }
+            log.warn("DexKit native lib load failed: ${ule.message}")
+            return false
+        } catch (t: Throwable) {
+            log.warn("DexKit native lib extraction failed: ${t.javaClass.simpleName}: ${t.message}")
+            return false
+        }
     }
 
     /**

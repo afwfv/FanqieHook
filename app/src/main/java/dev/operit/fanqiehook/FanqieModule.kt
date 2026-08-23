@@ -91,7 +91,13 @@ class FanqieModule : XposedModule() {
             log = log,
             // DexKit 2.x loads the DEX straight off disk rather than from the classloader, so it
             // needs the host's APK source dir.
-            apkPath = param.applicationInfo.sourceDir
+            apkPath = param.applicationInfo.sourceDir,
+            // The module's own APK: source of libdexkit.so. DexKit never loads it itself, and in
+            // an injected host process System.loadLibrary cannot see the host's lib path, so the
+            // resolver must extract + System.load() it from here (see ClassResolver docs).
+            moduleApkPath = runCatching { getModuleApplicationInfo()?.sourceDir }.getOrNull(),
+            // Host-writable dir used when the .so must be extracted (module runs as host UID).
+            hostDataDir = param.applicationInfo.dataDir
         )
         val manager = HookManager(this, log).also { hookManager = it }
 
