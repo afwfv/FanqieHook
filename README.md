@@ -1,6 +1,6 @@
 # FanqieHook
 
-番茄小说去广告模块 — 14 个 hook，拦截广告展示。
+番茄小说去广告模块 — 17 个 hook，拦截广告展示。
 
 - **目标应用**：`com.dragon.read` v7.3.3.32（versionCode 73332）
 - **框架**：LSPosed IT v2.1.1+（KernelSU / ZygiskSU）
@@ -10,7 +10,7 @@
 
 ```text
 1. 安装 LSPosed（KernelSU / ZygiskSU + LSPosed IT）
-2. 装 APK：adb install -r FanqieHook-v0.1.0-release.apk
+2. 装 APK：adb install -r FanqieHook-v0.2.0-release.apk
 3. 打开 LSPosed Manager → 模块 → 勾选 FanqieHook → 作用域选 com.dragon.read
 4. 强制停止番茄，重新打开
 ```
@@ -19,7 +19,7 @@
 
 ```bash
 adb logcat -s LSPosedLogDaemon:V | grep FanqieHook
-# 应看到 14 行 "hook installed:" + 实际使用时 "blocked ad position=..."
+# 应看到 17 行 "hook installed:" + 实际使用时 "blocked ad position=..."
 ```
 
 ## 拦截的广告位
@@ -38,14 +38,15 @@ adb logcat -s LSPosedLogDaemon:V | grep FanqieHook
 | `topview_main` | 首页 TopView |
 | `topview_reader` | 阅读器 TopView |
 | `series_pause_ad` | 短剧暂停广告 |
+| 听书信息流/贴片广告 | 听书播放中插入（v0.2.0 新增） |
 
 **用户主动点击的激励视频 / 金币 / 看广告免广告按钮不会被屏蔽。**
 
 ## 已验证
 
 - POCO dada / HyperOS 2 / Android 16 + LSPosed IT v2.1.1 (7842)
-- 14/14 hook 安装成功
-- 实测拦截 `reader_banner` / `video_reader_ad`
+- 17/17 hook 安装成功（含 DexKit 反查的 `h83.a` 深度防线）
+- 实测拦截：阅读器 banner、视频广告、翻页信息流广告、听书贴片广告
 
 ## 免责声明
 
