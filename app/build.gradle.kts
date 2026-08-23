@@ -53,4 +53,7 @@ dependencies {
     // because DexKit loads its own native shim at runtime.
     // Coordinate is `org.luckypray:dexkit` (NOT `io.github.lsposed:dexkit` — that's the old 1.x line).
     implementation("org.luckypray:dexkit:2.0.4")
+
+    // Embedded HTTP server for the in-host web console (config panel + book source API).
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 }

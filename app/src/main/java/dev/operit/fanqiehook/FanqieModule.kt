@@ -1,13 +1,20 @@
 package dev.operit.fanqiehook
 
 import android.content.pm.PackageInfo
+import dev.operit.fanqiehook.config.ModuleConfig
+import dev.operit.fanqiehook.hooks.AdHooks
+import dev.operit.fanqiehook.hooks.DefenseHooks
+import dev.operit.fanqiehook.hooks.UiCleanHooks
+import dev.operit.fanqiehook.hooks.VipHooks
+import dev.operit.fanqiehook.support.HookSupport
+import dev.operit.fanqiehook.web.WebConsole
+import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
 import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
-import dev.operit.fanqiehook.hooks.AdHooks
 
 /**
  * Modern libxposed API 102 entry point.
@@ -17,6 +24,14 @@ import dev.operit.fanqiehook.hooks.AdHooks
  *   2. [onPackageLoaded]  – package parsed, default classloader available (Q+)
  *   3. [onPackageReady]   – AppComponentFactory created; the classloader we want is here
  *   4. [onHotReloading] / [onHotReloaded] – module reloaded in place; tear down old hooks
+ *
+ * Two-phase installation (adapted from the MK module):
+ *   Phase 1 (onPackageReady): the 17 unconditional ad-blocking hooks + a single
+ *   MainApplication.onCreateAlways hook.
+ *   Phase 2 (MainApplication created): bind config sources, then install every
+ *   feature-gated hook group (Defense/VIP/UiClean) and optionally start the web
+ *   console. This is the only point where Application context and the full host
+ *   classloader are both guaranteed to exist.
  *
  * Safety gates applied BEFORE installing any hook (fail-closed):
  *   - Package name must equal [TARGET_PACKAGE].
@@ -36,6 +51,10 @@ class FanqieModule : XposedModule() {
     @Volatile
     private var hookManager: HookManager? = null
 
+    /** Phase-2 latch: feature hooks install exactly once per process. */
+    @Volatile
+    private var featureHooksInstalled = false
+
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         processName = param.processName
         log.info(
@@ -45,8 +64,6 @@ class FanqieModule : XposedModule() {
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
-        // Optional hook point for early init; we wait for onPackageReady because that is when the
-        // app classloader is fully wired.
         if (param.packageName != TARGET_PACKAGE) return
         if (!param.isFirstPackage) return
         log.debug("package loaded: ${param.packageName} (process=$processName)")
@@ -86,6 +103,11 @@ class FanqieModule : XposedModule() {
             "target ready: package=${param.packageName} process=$processName versionCode=$versionCode"
         )
 
+        // ── Phase 1: unconditional ad hooks + MainApplication trigger ──────────
+        HookSupport.module = this
+        HookSupport.log = log
+        HookSupport.dragonClassLoader = param.classLoader
+
         val resolver = ClassResolver(
             classLoader = param.classLoader,
             log = log,
@@ -99,11 +121,72 @@ class FanqieModule : XposedModule() {
             // Host-writable dir used when the .so must be extracted (module runs as host UID).
             hostDataDir = param.applicationInfo.dataDir
         )
+        HookSupport.classResolver = resolver
         val manager = HookManager(this, log).also { hookManager = it }
 
-        // Single entry point for every ad-related hook.
+        // Single entry point for every unconditional ad-related hook.
         // Each `installXxx` is internally try/catch; one failure cannot stop the rest.
         AdHooks(manager, resolver, log).installAll()
+
+        // ── MainApplication trigger for Phase 2 ────────────────────────────────
+        installMainApplicationTrigger(param.classLoader)
+    }
+
+    /**
+     * Hook MainApplication.onCreateAlways — fires once the host Application exists.
+     * Phase-2 feature hooks (config-gated groups + web console) install here.
+     */
+    private fun installMainApplicationTrigger(classLoader: ClassLoader) {
+        try {
+            val appClass = classLoader.loadClass("com.dragon.read.app.MainApplication")
+            val method = appClass.getDeclaredMethod("onCreateAlways")
+            hook(method).intercept { chain ->
+                val app = chain.thisObject as? android.app.Application
+                if (app != null) {
+                    onHostApplicationCreated(app)
+                }
+                chain.proceed()
+            }
+            log.info("main-application trigger installed: MainApplication#onCreateAlways")
+        } catch (t: Throwable) {
+            log.warn("main-application trigger failed: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    /** Phase 2: config-bound feature hooks + optional web console. */
+    private fun onHostApplicationCreated(app: android.app.Application) {
+        if (featureHooksInstalled) return
+        synchronized(this) {
+            if (featureHooksInstalled) return
+            featureHooksInstalled = true
+        }
+
+        HookSupport.dragonApplication = app
+        HookSupport.dragonClassLoader = app.classLoader
+
+        // Bind config sources: remote prefs (module app) → host SP fallback.
+        val remote = runCatching { getRemotePreferences(ModuleConfig.SP_NAME) }.getOrNull()
+        val hostSp = runCatching {
+            app.getSharedPreferences(ModuleConfig.SP_NAME, android.content.Context.MODE_PRIVATE)
+        }.getOrNull()
+        ModuleConfig.init(remote, hostSp)
+
+        // Feature-gated hook groups.
+        runCatching { DefenseHooks.installAll() }
+            .onFailure { log.warn("DefenseHooks failed: ${it.message}") }
+        runCatching { VipHooks.installAll() }
+            .onFailure { log.warn("VipHooks failed: ${it.message}") }
+        runCatching { UiCleanHooks.installAll() }
+            .onFailure { log.warn("UiCleanHooks failed: ${it.message}") }
+
+        // Optional web console.
+        if (ModuleConfig.startWebServer()) {
+            runCatching { WebConsole.start(ModuleConfig.webPort()) }
+                .onFailure { log.warn("WebConsole failed: ${it.message}") }
+        }
+
+        log.info("phase-2 hooks installed (localVip=${ModuleConfig.localVip()}, " +
+            "uiClean=${ModuleConfig.uiClean()}, web=${ModuleConfig.startWebServer()})")
     }
 
     /**
@@ -117,6 +200,9 @@ class FanqieModule : XposedModule() {
         log.info("hot reloading; releasing ${hookManager?.installedHandles?.size ?: 0} hook handles")
         hookManager?.unhookAll()
         hookManager = null
+        featureHooksInstalled = false
+        HookSupport.reset()
+        runCatching { WebConsole.stop() }
         return true
     }
 

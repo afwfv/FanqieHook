@@ -281,6 +281,46 @@ class ClassResolver(
         }
     }
 
+    /**
+     * Find classes by method signature via DexKit — the version-resilient way to
+     * locate obfuscated facades whose names drift between Fanqie releases
+     * (e.g. the RPC facade formerly known as `ro4.b`).
+     *
+     * All parameters are optional matchers; a null name/return type acts as a
+     * wildcard, and a null entry inside [paramTypeNames] matches any type in
+     * that position.
+     */
+    fun findClassesByMethodSignature(
+        methodName: String? = null,
+        returnTypeName: String? = null,
+        paramTypeNames: List<String?> = emptyList(),
+        alsoMethodName: String? = null,
+        maxResults: Int = 5
+    ): List<String> {
+        val b = bridge() ?: return emptyList()
+        return try {
+            b.findClass {
+                matcher {
+                    methods {
+                        add {
+                            if (methodName != null) name = methodName
+                            if (returnTypeName != null) returnType = returnTypeName
+                            paramTypes(*paramTypeNames.toTypedArray())
+                        }
+                        if (alsoMethodName != null) {
+                            add {
+                                name = alsoMethodName
+                            }
+                        }
+                    }
+                }
+            }.map { it.name }.take(maxResults)
+        } catch (t: Throwable) {
+            log.warn("DexKit method-signature search failed: ${t.javaClass.simpleName}: ${t.message}")
+            emptyList()
+        }
+    }
+
     private fun matchesReturnType(actual: Class<*>, requested: String): Boolean = when (requested) {
         "boolean" -> actual == java.lang.Boolean.TYPE
         "void" -> actual == java.lang.Void.TYPE
