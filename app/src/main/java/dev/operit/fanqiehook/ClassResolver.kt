@@ -1,5 +1,6 @@
 package dev.operit.fanqiehook
 
+import org.luckypray.dexkit.DexKitBridge
 import java.lang.reflect.Method
 
 /**
@@ -18,10 +19,24 @@ import java.lang.reflect.Method
  *
  * For arrays, generic collections, or generic types, resolve the leaf class first and pass
  * the resulting `Class<*>` via overloads below.
+ *
+ * DexKit fallback:
+ *   - [findClassImplementingInterface] uses DexKit 2.x at runtime to find targets whose class
+ *     names are obfuscated and may change between Fanqie releases. The bridge is lazily created
+ *     from [apkPath] + [classLoader] and reused.
+ *   - DexKit failure (e.g. on unsupported ART versions) is logged at WARN and degrades to an
+ *     empty result; callers should treat empty results the same as a hard miss.
  */
 class ClassResolver(
     private val classLoader: ClassLoader,
-    private val log: ModuleLog
+    private val log: ModuleLog,
+    /**
+     * APK source directory for the host app — needed by DexKit 2.x because it loads the DEX
+     * straight off disk rather than from the class loader. Passed in by [FanqieModule] from
+     * `PackageReadyParam.applicationInfo.sourceDir`. May be null in early lifecycle phases; in
+     * that case DexKit-backed lookups degrade to reflection-only.
+     */
+    private val apkPath: String? = null
 ) {
 
     fun findClass(name: String): Class<*>? {
@@ -84,6 +99,96 @@ class ClassResolver(
             log.warn("method lookup failed: $className#$methodName (${t.javaClass.simpleName})")
             null
         }
+    }
+
+    /**
+     * Find a single method on a specific class by name + return type, ignoring parameter types.
+     * Used when a hook target's parameters include obfuscated classes (e.g. `qh4.h`) that may
+     * be renamed between Fanqie versions.
+     */
+    fun findMethodIgnoringParams(
+        className: String,
+        methodName: String,
+        returnTypeName: String = "boolean"
+    ): Method? {
+        val owner = findClass(className) ?: return null
+        return try {
+            owner.declaredMethods.firstOrNull { m ->
+                m.name == methodName && matchesReturnType(m.returnType, returnTypeName)
+            }?.apply { isAccessible = true }
+        } catch (t: Throwable) {
+            log.warn("method scan failed: $className#$methodName (${t.javaClass.simpleName})")
+            null
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DexKit-backed lookups. Used for hooks whose target is obfuscated and may
+    // move between Fanqie versions (see FanqieHook_hooks_assessment.md).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private var dexKitBridge: DexKitBridge? = null
+
+    private fun bridge(): DexKitBridge? {
+        if (dexKitBridge == null) {
+            val path = apkPath
+            if (path == null) {
+                log.warn("DexKit unavailable: no apkPath supplied to ClassResolver")
+                return null
+            }
+            dexKitBridge = try {
+                DexKitBridge.create(path)
+            } catch (t: Throwable) {
+                log.warn("DexKit init failed: ${t.javaClass.simpleName}: ${t.message}")
+                null
+            }
+        }
+        return dexKitBridge
+    }
+
+    /**
+     * Find every loaded class that implements the given fully-qualified interface name.
+     *
+     * Returns a list of resolved [Class] objects (resolved through [classLoader]); failed
+     * resolutions are silently dropped. Returns an empty list if DexKit is unavailable or the
+     * interface itself cannot be found.
+     *
+     * Optional [methodName] further restricts results to classes declaring a method with that
+     * name (no signature filtering — useful when parameter types are obfuscated).
+     */
+    fun findClassImplementingInterface(
+        interfaceName: String,
+        methodName: String? = null
+    ): List<Class<*>> {
+        val b = bridge() ?: return emptyList()
+        return try {
+            val hits = b.findClass {
+                matcher {
+                    interfaces {
+                        add(interfaceName)
+                    }
+                    if (methodName != null) {
+                        methods {
+                            add {
+                                name = methodName
+                            }
+                        }
+                    }
+                }
+            }
+            hits.mapNotNull { runCatching { it.getInstance(classLoader) }.getOrNull() }
+        } catch (t: Throwable) {
+            log.warn("DexKit findClass implementing $interfaceName failed: ${t.javaClass.simpleName}")
+            emptyList()
+        }
+    }
+
+    private fun matchesReturnType(actual: Class<*>, requested: String): Boolean = when (requested) {
+        "boolean" -> actual == java.lang.Boolean.TYPE
+        "void" -> actual == java.lang.Void.TYPE
+        "int" -> actual == java.lang.Integer.TYPE
+        "long" -> actual == java.lang.Long.TYPE
+        else -> actual.name == requested
     }
 
     private fun resolveType(name: String): Class<*>? {

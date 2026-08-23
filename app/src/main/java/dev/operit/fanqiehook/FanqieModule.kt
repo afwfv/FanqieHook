@@ -86,7 +86,13 @@ class FanqieModule : XposedModule() {
             "target ready: package=${param.packageName} process=$processName versionCode=$versionCode"
         )
 
-        val resolver = ClassResolver(param.classLoader, log)
+        val resolver = ClassResolver(
+            classLoader = param.classLoader,
+            log = log,
+            // DexKit 2.x loads the DEX straight off disk rather than from the classloader, so it
+            // needs the host's APK source dir.
+            apkPath = param.applicationInfo.sourceDir
+        )
         val manager = HookManager(this, log).also { hookManager = it }
 
         // Single entry point for every ad-related hook.

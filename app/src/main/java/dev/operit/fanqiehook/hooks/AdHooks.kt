@@ -108,6 +108,10 @@ class AdHooks(
     // 3. Short-series pause-ad hooks
     //   SeriesPauseAdImpl.enablePauseAd()Z            (smali line 343)
     //   SeriesPauseAdImpl.canShowPauseAd(qh4.h)Z      (smali line 104)
+    //
+    //   `canShowPauseAd` takes an obfuscated interface (qh4.h) as its single argument. The
+    //   interface name changes between Fanqie releases, so we resolve by name + return type
+    //   via [ClassResolver.findMethodIgnoringParams] to remain version-resilient.
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun installSeriesPauseHooks() {
@@ -120,44 +124,60 @@ class AdHooks(
 
         hooks.replaceBooleanFalse(
             id = "series-pause-show",
-            method = resolver.findMethod(pause, "canShowPauseAd", "qh4.h"),
+            method = resolver.findMethodIgnoringParams(pause, "canShowPauseAd", returnTypeName = "boolean"),
         )
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // 4. Position filter (the "surgical" hook — most defensive)
     //
-    //   NsAdImpl.checkAdAvailable(String position, String source)Z        (smali line 3385)
-    //   h83.a.checkAdAvailable(String position, String source)Z          (smali line 2805)
+    //   NsAdImpl.checkAdAvailable(String position, String source)Z                (smali line 3385)
+    //   <NsAdConfigManagerApi impl>.checkAdAvailable(String, String)Z              (impl = h83.a in 73332)
     //
-    //   Multiple call sites are hit; the obfuscated `h83.a` is the impl of
-    //   `com.dragon.read.ad.manager.NsAdConfigManagerApi` and serves as the
-    //   ad-config cache front-end. Hooking both gives defence-in-depth.
+    //   Multiple call sites are hit. The second implementation lives on a class that implements
+    //   `com.dragon.read.ad.manager.NsAdConfigManagerApi` and serves as the ad-config cache
+    //   front-end. The implementation class is obfuscated (`h83.a` in 73332, will likely be
+    //   renamed in future releases), so we resolve it through DexKit by interface name.
+    //   Hooking both gives defence-in-depth; the DexKit lookup degrades to a no-op if the bridge
+    //   fails to initialise (logged WARN) or no impl class can be located.
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun installPositionFilter() {
-        listOf(
-            "com.dragon.read.component.biz.impl.NsAdImpl",
-            "h83.a"
-        ).forEach { className ->
-            val method = resolver.findMethod(className, "checkAdAvailable", "String", "String")
-            hooks.installBooleanFilter(
-                id = "position-filter:$className",
-                method = method,
-                deoptimize = false,
-                shouldBlock = { args ->
-                    val position = args.getOrNull(0)?.toString().orEmpty()
-                    val blocked = position in BLOCKED_POSITIONS
-                    if (blocked) {
-                        log.info(
-                            "blocked ad position=$position source=${args.getOrNull(1)} " +
-                                "via $className.checkAdAvailable"
-                        )
-                    }
-                    blocked
-                }
-            )
+        val nsAd = "com.dragon.read.component.biz.impl.NsAdImpl"
+        installPositionFilterOn(nsAd)
+
+        val impls = resolver.findClassImplementingInterface(
+            interfaceName = "com.dragon.read.ad.manager.NsAdConfigManagerApi",
+            methodName = "checkAdAvailable"
+        )
+        if (impls.isEmpty()) {
+            log.warn("position-filter: DexKit found no NsAdConfigManagerApi impl; only NsAdImpl hooked")
+        } else {
+            for (cls in impls) {
+                if (cls.name == nsAd) continue
+                installPositionFilterOn(cls.name)
+            }
         }
+    }
+
+    private fun installPositionFilterOn(className: String) {
+        val method = resolver.findMethod(className, "checkAdAvailable", "String", "String")
+        hooks.installBooleanFilter(
+            id = "position-filter:$className",
+            method = method,
+            deoptimize = false,
+            shouldBlock = { args ->
+                val position = args.getOrNull(0)?.toString().orEmpty()
+                val blocked = position in BLOCKED_POSITIONS
+                if (blocked) {
+                    log.info(
+                        "blocked ad position=$position source=${args.getOrNull(1)} " +
+                            "via $className.checkAdAvailable"
+                    )
+                }
+                blocked
+            }
+        )
     }
 
     // ─────────────────────────────────────────────────────────────────────────

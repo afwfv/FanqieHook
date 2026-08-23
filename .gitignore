@@ -34,3 +34,8 @@ Thumbs.db
 
 # Editor
 .vscode/
+
+# LSPosed / phone dumps (one-off captures from /data/adb/lspd)
+LSPosed_*/
+lspd-*/
+scopes*.txt
