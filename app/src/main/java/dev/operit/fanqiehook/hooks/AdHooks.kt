@@ -35,6 +35,7 @@ class AdHooks(
         installVipEntranceHooks()
         installReaderAdManagerHooks()
         installInspireAdHooks()
+        installAudioAdHooks()
         installExperimentalSplashHook()
     }
 
@@ -277,6 +278,43 @@ class AdHooks(
                 "com.dragon.read.pages.splash.AttributionManager",
                 "hasHitAttribution"
             ),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 9. Audio-book ad hooks (听书贴片广告)
+    //
+    //   NsAdImpl.enableRequestAudioInfoFlowAd()Z   (smali lines 5248-5274)
+    //   NsAdImpl.enableRequestAudioPatchAd()Z      (smali lines 5276-5302)
+    //
+    //   Both are thin delegates: they read `BsAudioAdService.IMPL` and call the
+    //   interface method if the service is present, else return false. Verified via
+    //   `mt_apk_dex_xref` (methodResolution=dispatch) that BsAudioAdService's two
+    //   methods are invoked ONLY from NsAdImpl — no business code calls the service
+    //   singleton directly, so hooking NsAdImpl is a complete entry-point cut.
+    //
+    //   These two gates decide whether 听书 audio flow and audiobook patch slots are wired
+    //   up to the ad SDK. They are NOT covered by BLOCKED_POSITIONS (听书 uses its own
+    //   position namespace inside the audio module, not the reader-side `*_ad` strings).
+    //   Forcing both to false cuts the audio-book ad pipeline at the entry point without
+    //   touching reward / coin flows. Same resilience pattern as section 7 — if either
+    //   method is renamed in a future build, [resolver.findMethod] returns null and the
+    //   hook is skipped with a WARN log; nothing else is affected.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installAudioAdHooks() {
+        val nsAd = "com.dragon.read.component.biz.impl.NsAdImpl"
+
+        hooks.replaceBooleanFalse(
+            id = "audio-info-flow-ad",
+            method = resolver.findMethod(nsAd, "enableRequestAudioInfoFlowAd"),
+            deoptimize = true,
+        )
+
+        hooks.replaceBooleanFalse(
+            id = "audio-patch-ad",
+            method = resolver.findMethod(nsAd, "enableRequestAudioPatchAd"),
+            deoptimize = true,
         )
     }
 
