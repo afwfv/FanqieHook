@@ -62,9 +62,46 @@ jobs:
             git push origin main
           fi
 
-  # 每次 push 到 main 都会自动构建并发布，无需手动打 tag。
+  # 检查自上次构建以来是否有 app 本身（源码/资源/构建配置）变更。
+  # 只有涉及 app 的变更才重新构建发布；纯 CI / 文档改动跳过构建。
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.app-changed.outputs.changed }}
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect app code changes
+        id: app-changed
+        env:
+          GH_TOKEN: ${{ secrets.XPOSED_REPO_TOKEN }}
+        run: |
+          repo=Xposed-Modules-Repo/dev.operit.fanqiehook
+          # 从模块仓库最新 release notes 解析上次构建的 commit
+          last_sha=$(gh release view --repo "$repo" --json body -q '.body' 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)
+          if [ -z "$last_sha" ]; then
+            echo "No previous release, will build."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # app 相关文件在此区间是否有变化
+          changed_files=$(git diff --name-only "$last_sha"..HEAD -- app build.gradle.kts settings.gradle.kts gradle.properties gradle gradlew gradlew.bat)
+          if [ -n "$changed_files" ]; then
+            echo "App code changed:"
+            echo "$changed_files"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No app code changes, skipping build."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # 每次 push 到 main 且 app 代码有变更时自动构建并发布；手动触发勾选 publish_release 可强制发布。
   release:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true')
+    needs: check
+    if: needs.check.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source repo
