@@ -130,11 +130,21 @@ jobs:
           # 从旧 release notes 解析上次发布的 commit，用于生成本次变更日志
           last_sha=$(gh release view "$tag" --repo "$repo" --json body -q '.body' 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)
 
-          # 生成 release notes：上次发布以来的提交；无记录则取最近 15 条
+          # 上次发布以来的全部提交；无记录则取最近 15 条
           if [ -n "$last_sha" ] && [ "$last_sha" != "$GITHUB_SHA" ]; then
-            { echo "Changes since \`${last_sha:0:7}\`:"; git log --oneline "$last_sha"..HEAD; } > RELEASE_NOTES.md
+            log=$(git log --oneline "$last_sha"..HEAD)
           else
-            { echo "Recent changes:"; git log --oneline -15 HEAD; } > RELEASE_NOTES.md
+            log=$(git log --oneline -15 HEAD)
+          fi
+
+          # 过滤 CI/文档/构建等内部提交，只保留面向用户的变更（feat/fix/新增/修复 等）
+          user_changes=$(echo "$log" | grep -viE '^(ci|docs|chore|build|test|refactor|style|perf)(\([^)]*\))?:|^[a-z]+\(ci\):' || true)
+
+          # 生成 release notes；无用户可见变更时给出提示
+          if [ -z "$user_changes" ]; then
+            echo "本次更新无面向用户的变更（仅 CI / 文档等内部更新）。" > RELEASE_NOTES.md
+          else
+            { echo "更新内容:"; echo "$user_changes"; } > RELEASE_NOTES.md
           fi
           echo "" >> RELEASE_NOTES.md
           echo "Built from \`$GITHUB_SHA\`" >> RELEASE_NOTES.md
