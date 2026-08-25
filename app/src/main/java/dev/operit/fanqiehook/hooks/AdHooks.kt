@@ -3,14 +3,15 @@ package dev.operit.fanqiehook.hooks
 import dev.operit.fanqiehook.ClassResolver
 import dev.operit.fanqiehook.HookManager
 import dev.operit.fanqiehook.ModuleLog
+import io.github.libxposed.api.XposedInterface.Hooker
 
 /**
  * All ad-related hooks for `com.dragon.read` versionCode 73332.
  *
- * Every hook target below was validated against the APK in
- * [D:/cc/fanqie-analysis/reports/Fanqie_v73332_逆向分析报告.md] § 5 (smali line numbers recorded in the
- * static evidence table § 6.1). Do not rename or remove methods without re-running round-1
- * reverse engineering against the new APK first.
+ * Every hook target below was validated against the APK (Fanqie v7.3.3.32, versionCode 73332;
+ * see the reverse-engineering report § 5; smali line numbers are recorded in the static
+ * evidence table § 6.1). Do not rename or remove methods without re-running reverse
+ * engineering against the new APK first.
  *
  * Position-string policy:
  *   The string parameter to [BLOCKED_POSITIONS] is matched against `String position` arguments
@@ -37,6 +38,8 @@ class AdHooks(
         installInspireAdHooks()
         installAudioAdHooks()
         installExperimentalSplashHook()
+        installShortSeriesAdHooks()
+        installSplashAdHooks()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -108,9 +111,9 @@ class AdHooks(
     // ─────────────────────────────────────────────────────────────────────────
     // 3. Short-series pause-ad hooks
     //   SeriesPauseAdImpl.enablePauseAd()Z            (smali line 343)
-    //   SeriesPauseAdImpl.canShowPauseAd(qh4.h)Z      (smali line 104)
+    //   SeriesPauseAdImpl.canShowPauseAd(ti4.h)Z      (smali line 104)
     //
-    //   `canShowPauseAd` takes an obfuscated interface (qh4.h) as its single argument. The
+    //   `canShowPauseAd` takes an obfuscated interface (ti4.h) as its single argument. The
     //   interface name changes between Fanqie releases, so we resolve by name + return type
     //   via [ClassResolver.findMethodIgnoringParams] to remain version-resilient.
     // ─────────────────────────────────────────────────────────────────────────
@@ -315,6 +318,118 @@ class AdHooks(
             id = "audio-patch-ad",
             method = resolver.findMethod(nsAd, "enableRequestAudioPatchAd"),
             deoptimize = true,
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10. Short-series ad hooks (红果短剧 / com.phoenix.read 侧)
+    //
+    //   Targeted at the Hongguo-only ad slots on the dragon baseline (versionCode 73332).
+    //   A single `AdHooks` instance covers both Fanqie (`com.dragon.read`) and Hongguo
+    //   (`com.phoenix.read`): classes absent on the Fanqie side resolve to null via
+    //   [ClassResolver.findMethod] and [HookManager.replaceBooleanFalse] logs a WARN.
+    //
+    //   Hook points (validated against the Hongguo APK):
+    //     - SeriesBannerAdConfig.enableBanner()Z / enableSdkSettings()Z
+    //       (implements ISeriesBannerAdConfig) — short-series banner ad master switch.
+    //     - HongguoBannerServiceImpl.enableShortSeriesAdJoinRevert()Z
+    //       (implements BsBannerService) — Hongguo-specific banner service.
+    //     - ExperimentUtil.q0()Z / p0()Z — short-video patch ad master switch and
+    //       landscape insert ad switch (read from ShortSeriesAdConfig / ShortSeriesLandscapeInsertAdConfig).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installShortSeriesAdHooks() {
+        // 短剧 banner 广告（红果 / com.phoenix.read 侧）
+        hooks.replaceBooleanFalse(
+            id = "series-banner-enable",
+            method = resolver.findMethod(
+                "com.dragon.read.ad.onestop.seriesbanner.config.SeriesBannerAdConfig",
+                "enableBanner"
+            ),
+            deoptimize = true,
+        )
+        hooks.replaceBooleanFalse(
+            id = "series-banner-sdk-settings",
+            method = resolver.findMethod(
+                "com.dragon.read.ad.onestop.seriesbanner.config.SeriesBannerAdConfig",
+                "enableSdkSettings"
+            ),
+        )
+        // 红果专属 banner 服务
+        hooks.replaceBooleanFalse(
+            id = "hongguo-banner-join-revert",
+            method = resolver.findMethod(
+                "com.dragon.read.ad.banner.impl.HongguoBannerServiceImpl",
+                "enableShortSeriesAdJoinRevert"
+            ),
+        )
+        // 短剧贴片广告总开关 + 横屏插入广告开关
+        hooks.replaceBooleanFalse(
+            id = "short-series-ad-enable",
+            method = resolver.findMethod(
+                "com.dragon.read.reader.ad.experiment.ExperimentUtil",
+                "q0"
+            ),
+            deoptimize = true,
+        )
+        hooks.replaceBooleanFalse(
+            id = "short-series-landscape-insert-ad",
+            method = resolver.findMethod(
+                "com.dragon.read.reader.ad.experiment.ExperimentUtil",
+                "p0"
+            ),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 11. Splash-ad bypass (开屏广告)
+    //
+    //   Hongguo shows an interstitial splash ad when returning to the app (hot start)
+    //   via OpeningScreenADActivity. Reverse engineering confirmed:
+    //     - The flow does NOT route through the boolean switches above nor the position
+    //       filter ("splash_ad" strings in SplashHelper are telemetry only).
+    //     - `NsAdImpl.openOpeningScreenAdActivity(Context, PageRecorder)V` is the launch
+    //       entry (dispatched from NsAppNavigator through NsAdApi).
+    //     - OpeningScreenADActivity mounts the ad views via showBrandAdView /
+    //       showImcSplashView / showNaturalAdView(View)V.
+    //
+    //   Strategy: no-op the launch entry (main cut) plus the three view-mounting methods
+    //   (belt-and-braces in case some other path starts the activity). All four targets
+    //   exist on both Fanqie and Hongguo (same 73332 baseline); a missing target degrades
+    //   to a WARN like every other hook.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installSplashAdHooks() {
+        val nsAd = "com.dragon.read.component.biz.impl.NsAdImpl"
+        val splashActivity = "com.dragon.read.ad.openingscreenad.OpeningScreenADActivity"
+
+        // 阻断热启动开屏广告 Activity 的启动入口（void no-op）
+        hooks.install(
+            id = "splash-ad-activity-open",
+            method = resolver.findMethod(
+                nsAd,
+                "openOpeningScreenAdActivity",
+                "android.content.Context",
+                "com.dragon.read.report.PageRecorder"
+            ),
+            deoptimize = true,
+            hooker = Hooker { /* 不调用 proceed，直接阻断 */ },
+        )
+        // 双保险：即使 Activity 被其他途径拉起，广告 View 也不会挂载
+        hooks.install(
+            id = "splash-ad-brand-view",
+            method = resolver.findMethod(splashActivity, "showBrandAdView", "android.view.View"),
+            hooker = Hooker { /* no-op */ },
+        )
+        hooks.install(
+            id = "splash-ad-imc-view",
+            method = resolver.findMethod(splashActivity, "showImcSplashView", "android.view.View"),
+            hooker = Hooker { /* no-op */ },
+        )
+        hooks.install(
+            id = "splash-ad-natural-view",
+            method = resolver.findMethod(splashActivity, "showNaturalAdView", "android.view.View"),
+            hooker = Hooker { /* no-op */ },
         )
     }
 

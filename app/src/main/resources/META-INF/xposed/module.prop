@@ -1,9 +1,9 @@
 id=FanqieHook
 name=Fanqie Ad Remover
-version=v0.2.0
-versionCode=2
+version=v0.3.0
+versionCode=14
 author=afwfv
-description=针对番茄小说 (com.dragon.read) v7.3.3.32 (versionCode 73332) 主进程的去广告 LSPosed / libxposed API 102 模块。所有 hook 目标经过 smali 行号验证，仅在该版本下生效。
+description=针对番茄小说 (com.dragon.read) 与红果免费短剧 (com.phoenix.read) v7.3.3.32 (versionCode 73332) 主进程的去广告 LSPosed / libxposed API 102 模块。两者同属字节 dragon 基线，广告类仍在 com.dragon.read.* 命名空间；所有 hook 目标经过 DEX 核验，仅在该版本下生效。
 updateJson=https://raw.githubusercontent.com/afwfv/FanqieHook/main/update.json
 actionIcon=launcher.png
 minApiVersion=101

@@ -1,53 +1,49 @@
 # FanqieHook
 
-番茄小说去广告模块 — 17 个 hook，拦截广告展示。
+面向番茄小说与红果免费短剧 Android 客户端的 LSPosed 去广告模块，24 个 hook 拦截广告展示。
 
-- **目标应用**：`com.dragon.read` v7.3.3.32（versionCode 73332）
-- **框架**：LSPosed IT v2.1.1+（KernelSU / ZygiskSU）
-- **作者**：afwfv
+## 功能
 
-## 安装使用
+- 拦截阅读器广告：底部 banner、视频广告、翻页信息流、文字链接、章节断开处广告
+- 拦截首页与阅读器 TopView 广告
+- 拦截听书信息流 / 贴片广告
+- 拦截短剧暂停广告
+- 拦截红果短剧 banner、贴片、横屏插入广告
+- 拦截红果热启动开屏广告（Activity 级阻断）
+- 保留用户主动点击的激励视频 / 金币 / 看广告免广告按钮
 
-```text
-1. 安装 LSPosed（KernelSU / ZygiskSU + LSPosed IT）
-2. 装 APK：adb install -r FanqieHook-v0.2.0-release.apk
-3. 打开 LSPosed Manager → 模块 → 勾选 FanqieHook → 作用域选 com.dragon.read
-4. 强制停止番茄，重新打开
-```
+## 兼容范围
+
+| 项目 | 内容 |
+|---|---|
+| 当前支持 | LSPosed Modern API（101+，102 已适配）|
+| 已验证应用 | 番茄小说 `com.dragon.read`、红果免费短剧 `com.phoenix.read` v7.3.3.32（versionCode 73332）|
+| Android | 8.0（API 26）及以上 |
+| 作用域 | `com.dragon.read`、`com.phoenix.read` |
+| 模块包名 | `dev.operit.fanqiehook` |
+| 模块版本 | v0.3.0（versionCode 14）|
+
+> 模块针对 v7.3.3.32 的运行时结构适配。应用升级后，广告类名、方法名或调用链可能变化，届时需要重新适配。
+
+## 安装与使用
+
+1. 安装 LSPosed 框架。
+2. 安装 `FanqieHook-v0.3.0-release.apk`。
+3. 在 LSPosed 中启用模块，勾选作用域 `com.dragon.read` 与 `com.phoenix.read`。
+4. 强制停止番茄小说 / 红果免费短剧后重新打开。
 
 验证：
 
 ```bash
 adb logcat -s LSPosedLogDaemon:V | grep FanqieHook
-# 应看到 17 行 "hook installed:" + 实际使用时 "blocked ad position=..."
+# 应看到 "hook installed:" 记录，实际使用时出现 "blocked ad position=..."
 ```
-
-## 拦截的广告位
-
-| 广告位 | 出现位置 |
-|---|---|
-| `splash_ad` | 启动开屏 |
-| `page_front_ad` | 阅读页头部 |
-| `page_middle_ad` | 阅读页中部 |
-| `page_end_ad` | 阅读页末尾 |
-| `reader_banner` | 阅读器底部 banner |
-| `reader_text_link_ad` | 阅读器文字链接广告 |
-| `reader_disconnected_ad` | 章节断开处广告 |
-| `reader_ad_for_sati` | 阅读器激励位 |
-| `video_reader_ad` | 阅读器视频广告 |
-| `topview_main` | 首页 TopView |
-| `topview_reader` | 阅读器 TopView |
-| `series_pause_ad` | 短剧暂停广告 |
-| 听书信息流/贴片广告 | 听书播放中插入（v0.2.0 新增） |
-
-**用户主动点击的激励视频 / 金币 / 看广告免广告按钮不会被屏蔽。**
 
 ## 已验证
 
-- POCO dada / HyperOS 2 / Android 16 + LSPosed IT v2.1.1 (7842)
-- 17/17 hook 安装成功（含 DexKit 反查的 `h83.a` 深度防线）
-- 实测拦截：阅读器 banner、视频广告、翻页信息流广告、听书贴片广告
+- 番茄侧与红果侧 hook 全部安装成功（含 DexKit 反查的 `h83.a` 深度防线）
+- 实测拦截：阅读器 banner、视频广告、翻页信息流广告、听书贴片广告、红果开屏与短剧 banner 广告
 
 ## 免责声明
 
-仅供学习研究，绕过广告可能违反番茄《用户协议》。
+仅供学习研究，绕过广告可能违反番茄小说 / 红果《用户协议》。

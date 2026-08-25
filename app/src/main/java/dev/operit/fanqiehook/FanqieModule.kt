@@ -19,12 +19,12 @@ import dev.operit.fanqiehook.hooks.AdHooks
  *   4. [onHotReloading] / [onHotReloaded] – module reloaded in place; tear down old hooks
  *
  * Safety gates applied BEFORE installing any hook (fail-closed):
- *   - Package name must equal [TARGET_PACKAGE].
- *   - Process name must equal the main process [TARGET_PROCESS] (do NOT touch `:push`,
- *     `:widgetProvider`, `:miniappX`, etc. – see § 6 of the analysis report).
- *   - versionCode must equal [TARGET_VERSION_CODE] exactly. A new APK version that
- *     refactors a single class will silently break hardcoded hooks; refuse to install
- *     instead of crashing inside the host app.
+ *   - Package name must be one of [TARGET_PACKAGES] (番茄小说 / 红果免费短剧).
+ *   - Process name must equal the package name, i.e. the host's main process (do NOT touch
+ *     `:push`, `:widgetProvider`, `:miniappX`, etc. – see § 6 of the analysis report).
+ *   - versionCode must equal the value registered for that package in
+ *     [SUPPORTED_VERSION_CODES] exactly. A new APK version that refactors a single class will
+ *     silently break hardcoded hooks; refuse to install instead of crashing inside the host app.
  */
 class FanqieModule : XposedModule() {
 
@@ -47,27 +47,31 @@ class FanqieModule : XposedModule() {
     override fun onPackageLoaded(param: PackageLoadedParam) {
         // Optional hook point for early init; we wait for onPackageReady because that is when the
         // app classloader is fully wired.
-        if (param.packageName != TARGET_PACKAGE) return
+        if (param.packageName !in TARGET_PACKAGES) return
         if (!param.isFirstPackage) return
         log.debug("package loaded: ${param.packageName} (process=$processName)")
     }
 
     override fun onPackageReady(param: PackageReadyParam) {
-        if (param.packageName != TARGET_PACKAGE) {
+        val packageName = param.packageName
+        if (packageName !in TARGET_PACKAGES) {
             // Scope list should already filter, but defensively short-circuit.
             return
         }
         if (!param.isFirstPackage) {
-            log.debug("not first package: ${param.packageName}, skip")
+            log.debug("not first package: $packageName, skip")
             return
         }
-        if (processName != TARGET_PROCESS) {
-            log.info("skip non-main process: $processName")
+        // Every supported host names its main process exactly after the package name; any other
+        // value means we landed in `:push`, `:widgetProvider`, `:miniappX`, … which must stay clean.
+        if (processName != packageName) {
+            log.info("skip non-main process: $processName (package=$packageName)")
             return
         }
 
+        val expectedVersionCode = SUPPORTED_VERSION_CODES.getValue(packageName)
         val versionCode = readVersionCode(param)
-        if (versionCode != TARGET_VERSION_CODE) {
+        if (versionCode != expectedVersionCode) {
             if (FAIL_OPEN && versionCode == -1L) {
                 log.warn(
                     "versionCode unknown (hidden-API blocked on this device). FAIL_OPEN=true; " +
@@ -75,7 +79,8 @@ class FanqieModule : XposedModule() {
                 )
             } else {
                 log.warn(
-                    "unsupported versionCode=$versionCode; expected=$TARGET_VERSION_CODE. " +
+                    "unsupported versionCode=$versionCode for $packageName; " +
+                        "expected=$expectedVersionCode. " +
                         "Refusing to install hooks to avoid version mismatch."
                 )
                 return
@@ -83,7 +88,7 @@ class FanqieModule : XposedModule() {
         }
 
         log.info(
-            "target ready: package=${param.packageName} process=$processName versionCode=$versionCode"
+            "target ready: package=$packageName process=$processName versionCode=$versionCode"
         )
 
         val resolver = ClassResolver(
@@ -186,10 +191,23 @@ class FanqieModule : XposedModule() {
         const val UNKNOWN_PROCESS = "<unknown>"
 
         // ---- Module gates -------------------------------------------------------
-        // Bump TARGET_VERSION_CODE only after re-running the round-1 reverse analysis on the new APK.
-        const val TARGET_PACKAGE = "com.dragon.read"
-        const val TARGET_PROCESS = "com.dragon.read"
-        const val TARGET_VERSION_CODE = 73332L
+        // Bump an entry in SUPPORTED_VERSION_CODES only after re-running the round-1 reverse
+        // analysis on that APK.
+        //
+        // `com.dragon.read`  – 番茄小说
+        // `com.phoenix.read` – 红果免费短剧
+        //
+        // Both are built from the same ByteDance "dragon" baseline (identical versionCode 73332)
+        // and still ship the ad classes under the `com.dragon.read.*` namespace, so a single
+        // AdHooks implementation covers both. Obfuscated delegate names DO differ between them
+        // (`h83.a` vs `n83.a` for the NsAdConfigManagerApi impl), which is exactly why those are
+        // resolved through DexKit by interface rather than by hardcoded name.
+        val SUPPORTED_VERSION_CODES = mapOf(
+            "com.dragon.read" to 73332L,
+            "com.phoenix.read" to 73332L
+        )
+
+        val TARGET_PACKAGES = SUPPORTED_VERSION_CODES.keys
 
         /**
          * If the host's `versionCode` cannot be determined (e.g. Android 14+ greylist blocks every

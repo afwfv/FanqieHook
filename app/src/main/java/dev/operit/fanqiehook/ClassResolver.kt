@@ -140,7 +140,7 @@ class ClassResolver(
 
     // ─────────────────────────────────────────────────────────────────────────
     // DexKit-backed lookups. Used for hooks whose target is obfuscated and may
-    // move between Fanqie versions (see FanqieHook_hooks_assessment.md).
+    // move between Fanqie versions.
     // ─────────────────────────────────────────────────────────────────────────
 
     private var dexKitBridge: DexKitBridge? = null

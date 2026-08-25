@@ -13,8 +13,8 @@ android {
         applicationId = "dev.operit.fanqiehook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 14
+        versionName = "0.3.0"
     }
 
     buildTypes {
@@ -48,8 +48,8 @@ dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
 
     // DexKit: runtime DEX search used to find obfuscated-class targets whose class name
-    // changes between Fanqie releases. Only a small subset of hooks actually need it; see
-    // `FanqieHook_hooks_assessment.md`. Pulled in as `implementation` (not `compileOnly`)
+    // changes between Fanqie releases. Only a small subset of hooks actually need it. Pulled
+    // in as `implementation` (not `compileOnly`)
     // because DexKit loads its own native shim at runtime.
     // Coordinate is `org.luckypray:dexkit` (NOT `io.github.lsposed:dexkit` — that's the old 1.x line).
     implementation("org.luckypray:dexkit:2.0.4")
