@@ -112,8 +112,8 @@ jobs:
       - name: Read version from module.prop
         id: version
         run: |
-          versionCode=$(grep '^versionCode=' app/src/main/resources/META-INF/xposed/module.prop | cut -d= -f2)
-          versionName=$(grep '^versionName=' app/src/main/resources/META-INF/xposed/module.prop | cut -d= -f2)
+          versionCode=$(grep '^versionCode=' app/src/main/resources/META-INF/xposed/module.prop | cut -d= -f2 | tr -d '\r')
+          versionName=$(grep '^version=' app/src/main/resources/META-INF/xposed/module.prop | cut -d= -f2 | tr -d '\r' | sed 's/^v//')
           echo "tag=${versionCode}-${versionName}" >> "$GITHUB_OUTPUT"
           echo "versionName=${versionName}" >> "$GITHUB_OUTPUT"
 
