@@ -157,15 +157,15 @@ jobs:
           echo "tag=${versionCode}-${versionName}" >> "$GITHUB_OUTPUT"
           echo "versionName=${versionName}" >> "$GITHUB_OUTPUT"
 
-      - name: Publish release on Xposed modules repo (upsert)
+      - name: Prepare release notes
         env:
           GH_TOKEN: ${{ secrets.XPOSED_REPO_TOKEN }}
         run: |
+          # 模块仓库与自家仓库共用同一份更新说明
           tag="${{ steps.version.outputs.tag }}"
-          repo=Xposed-Modules-Repo/dev.operit.fanqiehook
 
-          # 从旧 release notes 解析上次发布的 commit，用于生成本次变更日志
-          last_sha=$(gh release view "$tag" --repo "$repo" --json body -q '.body' 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)
+          # 从旧 release notes 解析上次发布的 commit，用于回退生成本次变更日志
+          last_sha=$(gh release view "$tag" --repo Xposed-Modules-Repo/dev.operit.fanqiehook --json body -q '.body' 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)
 
           # 从 CHANGELOG.md 读取更新说明：优先按当前版本号匹配「## x.x.x」段，其次「未发布」段
           changelog_section=""
@@ -209,7 +209,34 @@ jobs:
           echo "" >> RELEASE_NOTES.md
           echo "Built from \`$GITHUB_SHA\`" >> RELEASE_NOTES.md
 
+      - name: Publish release on Xposed modules repo (upsert)
+        env:
+          GH_TOKEN: ${{ secrets.XPOSED_REPO_TOKEN }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          repo=Xposed-Modules-Repo/dev.operit.fanqiehook
+
           # 同名 tag 已存在则先删除再重建（保证模块中心始终指向最新构建）
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            echo "Tag $tag already exists, deleting and recreating..."
+            gh release delete "$tag" --repo "$repo" --yes
+          fi
+
+          gh release create "$tag" \
+            app/build/outputs/apk/release/app-release.apk \
+            --repo "$repo" \
+            --title "FanqieHook v${{ steps.version.outputs.versionName }}" \
+            --notes-file RELEASE_NOTES.md \
+            --latest
+
+      # 同时把 Release 同步到自家仓库（tag: v[versionName]），保持两处一致
+      - name: Publish release on own repo (upsert)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v${{ steps.version.outputs.versionName }}"
+          repo=${{ github.repository }}
+
           if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
             echo "Tag $tag already exists, deleting and recreating..."
             gh release delete "$tag" --repo "$repo" --yes
