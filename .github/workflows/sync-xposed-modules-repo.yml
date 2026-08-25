@@ -17,12 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: source
 
       - name: Checkout Xposed modules repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: Xposed-Modules-Repo/dev.operit.fanqiehook
           token: ${{ secrets.XPOSED_REPO_TOKEN }}
