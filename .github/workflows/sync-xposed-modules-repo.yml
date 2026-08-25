@@ -167,19 +167,20 @@ jobs:
           # 从旧 release notes 解析上次发布的 commit，用于生成本次变更日志
           last_sha=$(gh release view "$tag" --repo "$repo" --json body -q '.body' 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)
 
-          # 上次发布以来的全部提交；无记录则取最近 15 条
+          # 上次发布以来的全部提交（排除 merge）；无记录则取最近 15 条
           if [ -n "$last_sha" ] && [ "$last_sha" != "$GITHUB_SHA" ]; then
-            log=$(git log --oneline "$last_sha"..HEAD)
+            log=$(git log --no-merges --oneline "$last_sha"..HEAD)
           else
-            log=$(git log --oneline -15 HEAD)
+            log=$(git log --no-merges --oneline -15 HEAD)
           fi
 
-          # 过滤 CI/文档/构建等内部提交，只保留面向用户的变更（feat/fix/新增/修复 等）
-          user_changes=$(echo "$log" | grep -viE '^(ci|docs|chore|build|test|refactor|style|perf)(\([^)]*\))?:|^[a-z]+\(ci\):' || true)
+          # 过滤 CI/构建等内部提交（消息以 ci/chore/build/test 开头，或带 (ci) 作用域），保留面向用户的变更
+          # 注意 git log --oneline 输出为 "hash 提交信息"，需跳过行首 hash 再匹配
+          user_changes=$(echo "$log" | grep -viE '^[0-9a-f]+\s+(ci|chore|build|test)(\([^)]*\))?:|^[0-9a-f]+\s+[a-z]+\(ci\):' || true)
 
           # 生成 release notes；无用户可见变更时给出提示
           if [ -z "$user_changes" ]; then
-            echo "本次更新无面向用户的变更（仅 CI / 文档等内部更新）。" > RELEASE_NOTES.md
+            echo "本次更新无面向用户的变更（仅内部维护更新）。" > RELEASE_NOTES.md
           else
             { echo "更新内容:"; echo "$user_changes"; } > RELEASE_NOTES.md
           fi
