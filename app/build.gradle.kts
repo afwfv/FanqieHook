@@ -17,12 +17,27 @@ android {
         versionName = "0.3.0"
     }
 
+    signingConfigs {
+        // CI 固定签名：由 workflow 注入本地 debug.keystore，保证每次构建签名一致。
+        // 未配置 KEYSTORE_PATH 时（本地开发）不启用，release 回退 debug 签名。
+        create("ci") {
+            val path = System.getenv("KEYSTORE_PATH")
+            if (path != null) {
+                storeFile = file(path)
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("KEYSTORE_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("KEYSTORE_KEY_PASSWORD") ?: "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             // LSPosed modules are loaded by the framework at runtime; R8 / shrinking must be
             // disabled to keep all reflective targets intact.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (System.getenv("KEYSTORE_PATH") != null)
+                signingConfigs.getByName("ci") else signingConfigs.getByName("debug")
         }
     }
 

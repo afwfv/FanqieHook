@@ -78,6 +78,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up fixed signing keystore
+        if: secrets.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/keystore.jks" >> "$GITHUB_ENV"
+
       - name: Build release APK
         run: |
           chmod +x gradlew
