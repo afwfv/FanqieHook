@@ -79,12 +79,16 @@ jobs:
           java-version: '17'
 
       - name: Set up fixed signing keystore
-        if: secrets.KEYSTORE_BASE64 != ''
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keystore.jks"
-          echo "KEYSTORE_PATH=$RUNNER_TEMP/keystore.jks" >> "$GITHUB_ENV"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keystore.jks"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/keystore.jks" >> "$GITHUB_ENV"
+            echo "Using fixed signing keystore from KEYSTORE_BASE64"
+          else
+            echo "KEYSTORE_BASE64 not set, using default signing"
+          fi
 
       - name: Build release APK
         run: |
