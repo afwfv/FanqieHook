@@ -6,8 +6,9 @@
 
 ## 未发布
 
-## 0.3.0 - 2026-08-26
-
-- 模块名称更新为「番茄 红果 版本7.3.3.32去广告」，优化模块描述
-- 模块描述补充"支持 LSPosed 热重载"
-- 更新说明改为自动读取 CHANGELOG，后续更新将展示清晰的版本说明
+## 0.3.0
+v0.3.0 - 红果短剧 + 开屏广告拦截
+新增红果短剧广告拦截（banner、贴片、横屏插入）与热启动开屏广告 Activity 级阻断
+作用域覆盖 com.dragon.read 与 com.phoenix.read
+番茄侧与红果侧 hook 全部安装成功；红果开屏、短剧 banner/贴片广告消失
+安装：LSPosed -> 模块 -> 勾选 FanqieHook -> 作用域选 com.dragon.read 与 com.phoenix.read
