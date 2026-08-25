@@ -167,10 +167,22 @@ jobs:
           # 从旧 release notes 解析上次发布的 commit，用于生成本次变更日志
           last_sha=$(gh release view "$tag" --repo "$repo" --json body -q '.body' 2>/dev/null | grep -oE '[0-9a-f]{40}' | head -1 || true)
 
-          # 优先使用 CHANGELOG.md「未发布」段作为本次更新说明（用户可维护的中文说明）
+          # 从 CHANGELOG.md 读取更新说明：优先按当前版本号匹配「## x.x.x」段，其次「未发布」段
           changelog_section=""
           if [ -f CHANGELOG.md ]; then
-            changelog_section=$(awk '/^## 未发布$/{flag=1; next} /^## / && flag{flag=0} flag{print}' CHANGELOG.md 2>/dev/null | sed '/^[[:space:]]*$/d')
+            ver="${{ steps.version.outputs.versionName }}"
+            # 1) 按版本号段读取（支持 ## 0.3.0、## v0.3.0、## 0.3.0 - 日期 等标题）
+            changelog_section=$(awk -v v="$ver" '
+              /^## / {
+                t = $2; sub(/^v/, "", t);
+                if (t == v) { flag = 1; next } else { flag = 0 }
+              }
+              flag { print }
+            ' CHANGELOG.md 2>/dev/null | sed '/^[[:space:]]*$/d')
+            # 2) 找不到对应版本段时，回退「未发布」段
+            if [ -z "$changelog_section" ]; then
+              changelog_section=$(awk '/^## 未发布$/{flag=1; next} /^## / && flag{flag=0} flag{print}' CHANGELOG.md 2>/dev/null | sed '/^[[:space:]]*$/d')
+            fi
           fi
 
           if [ -n "$changelog_section" ]; then
