@@ -1,0 +1,56 @@
+name: Sync to Xposed Modules Repo
+
+# 源仓库每次更新（push 到 main / 打 v* tag / 手动触发）时，
+# 自动把完整源码同步到 Xposed-Modules-Repo/dev.operit.fanqiehook，
+# 官方构建系统会监听该仓库的 push 并自动构建发布 APK。
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Checkout Xposed modules repo
+        uses: actions/checkout@v4
+        with:
+          repository: Xposed-Modules-Repo/dev.operit.fanqiehook
+          token: ${{ secrets.XPOSED_REPO_TOKEN }}
+          path: xposed-repo
+
+      - name: Sync source files into modules repo
+        run: |
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.gradle/' \
+            --exclude='.idea/' \
+            --exclude='.kotlin/' \
+            --exclude='local.properties' \
+            --exclude='*.log' \
+            --exclude='release/' \
+            --exclude='**/build/' \
+            source/ xposed-repo/
+
+      - name: Commit and push
+        run: |
+          cd xposed-repo
+          git config user.name "afwfv"
+          git config user.email "afwfv@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to sync"
+          else
+            git commit -m "chore: sync from afwfv/FanqieHook @ ${GITHUB_SHA::7}"
+            git push origin main
+          fi
