@@ -13,8 +13,8 @@ android {
         applicationId = "dev.operit.fanqiehook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.3.0"
+        versionCode = 15
+        versionName = "0.4.0"
     }
 
     signingConfigs {

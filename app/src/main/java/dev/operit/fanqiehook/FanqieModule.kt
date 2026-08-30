@@ -197,14 +197,14 @@ class FanqieModule : XposedModule() {
         // `com.dragon.read`  – 番茄小说
         // `com.phoenix.read` – 红果免费短剧
         //
-        // Both are built from the same ByteDance "dragon" baseline (identical versionCode 73332)
+        // Both are built from the same ByteDance "dragon" baseline (identical versionCode 73532)
         // and still ship the ad classes under the `com.dragon.read.*` namespace, so a single
         // AdHooks implementation covers both. Obfuscated delegate names DO differ between them
         // (`h83.a` vs `n83.a` for the NsAdConfigManagerApi impl), which is exactly why those are
         // resolved through DexKit by interface rather than by hardcoded name.
         val SUPPORTED_VERSION_CODES = mapOf(
-            "com.dragon.read" to 73332L,
-            "com.phoenix.read" to 73332L
+            "com.dragon.read" to 73532L,
+            "com.phoenix.read" to 73532L
         )
 
         val TARGET_PACKAGES = SUPPORTED_VERSION_CODES.keys

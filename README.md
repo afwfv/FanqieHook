@@ -17,13 +17,13 @@
 | 项目 | 内容 |
 |---|---|
 | 当前支持 | LSPosed Modern API（101+，102 已适配）|
-| 已验证应用 | 番茄小说 `com.dragon.read`、红果免费短剧 `com.phoenix.read` v7.3.3.32（versionCode 73332）|
+| 已验证应用 | 番茄小说 `com.dragon.read` v7.3.5.32（versionCode 73532，已按新版 APK 复核）；红果免费短剧 `com.phoenix.read` 同基线（versionCode 73532）|
 | Android | 8.0（API 26）及以上 |
 | 作用域 | `com.dragon.read`、`com.phoenix.read` |
 | 模块包名 | `dev.operit.fanqiehook` |
 | 模块版本 | v0.3.0（versionCode 14）|
 
-> 模块针对 v7.3.3.32 的运行时结构适配。应用升级后，广告类名、方法名或调用链可能变化，届时需要重新适配。
+> 模块针对 v7.3.5.32 的运行时结构适配（旧适配目标 v7.3.3.32 已由 73532 版本复核替换）。应用升级后，广告类名、方法名或调用链可能变化，届时需要重新适配。
 
 ## 安装与使用
 

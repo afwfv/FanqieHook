@@ -6,9 +6,9 @@ import dev.operit.fanqiehook.ModuleLog
 import io.github.libxposed.api.XposedInterface.Hooker
 
 /**
- * All ad-related hooks for `com.dragon.read` versionCode 73332.
+ * All ad-related hooks for `com.dragon.read` versionCode 73532.
  *
- * Every hook target below was validated against the APK (Fanqie v7.3.3.32, versionCode 73332;
+ * Every hook target below was validated against the APK (Fanqie v7.3.5.32, versionCode 73532;
  * see the reverse-engineering report § 5; smali line numbers are recorded in the static
  * evidence table § 6.1). Do not rename or remove methods without re-running reverse
  * engineering against the new APK first.
@@ -136,11 +136,11 @@ class AdHooks(
     // 4. Position filter (the "surgical" hook — most defensive)
     //
     //   NsAdImpl.checkAdAvailable(String position, String source)Z                (smali line 3385)
-    //   <NsAdConfigManagerApi impl>.checkAdAvailable(String, String)Z              (impl = h83.a in 73332)
+    //   <NsAdConfigManagerApi impl>.checkAdAvailable(String, String)Z              (impl = h83.a in 73532)
     //
     //   Multiple call sites are hit. The second implementation lives on a class that implements
     //   `com.dragon.read.ad.manager.NsAdConfigManagerApi` and serves as the ad-config cache
-    //   front-end. The implementation class is obfuscated (`h83.a` in 73332, will likely be
+    //   front-end. The implementation class is obfuscated (`h83.a` in 73532, will likely be
     //   renamed in future releases), so we resolve it through DexKit by interface name.
     //   Hooking both gives defence-in-depth; the DexKit lookup degrades to a no-op if the bridge
     //   fails to initialise (logged WARN) or no impl class can be located.
@@ -324,7 +324,7 @@ class AdHooks(
     // ─────────────────────────────────────────────────────────────────────────
     // 10. Short-series ad hooks (红果短剧 / com.phoenix.read 侧)
     //
-    //   Targeted at the Hongguo-only ad slots on the dragon baseline (versionCode 73332).
+    //   Targeted at the Hongguo-only ad slots on the dragon baseline (versionCode 73532).
     //   A single `AdHooks` instance covers both Fanqie (`com.dragon.read`) and Hongguo
     //   (`com.phoenix.read`): classes absent on the Fanqie side resolve to null via
     //   [ClassResolver.findMethod] and [HookManager.replaceBooleanFalse] logs a WARN.
@@ -334,8 +334,9 @@ class AdHooks(
     //       (implements ISeriesBannerAdConfig) — short-series banner ad master switch.
     //     - HongguoBannerServiceImpl.enableShortSeriesAdJoinRevert()Z
     //       (implements BsBannerService) — Hongguo-specific banner service.
-    //     - ExperimentUtil.q0()Z / p0()Z — short-video patch ad master switch and
-    //       landscape insert ad switch (read from ShortSeriesAdConfig / ShortSeriesLandscapeInsertAdConfig).
+    //     - ExperimentUtil.p()Z / q0()Z — multi-series flow ad master switch and
+    //       landscape insert ad switch (read from SeriesAdConfig / ShortSeriesLandscapeInsertAdConfig).
+    //       NOTE: previously hardcoded `p0()` which does NOT exist in v7.3.5.32 (fixed to `p()`).
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun installShortSeriesAdHooks() {
@@ -363,12 +364,17 @@ class AdHooks(
                 "enableShortSeriesAdJoinRevert"
             ),
         )
-        // 短剧贴片广告总开关 + 横屏插入广告开关
+        // 短剧广告总开关 + 横屏插入广告开关
+        //
+        // 验证结果 (versionCode 73532, 番茄+红果):
+        //   - q0() → ShortSeriesLandscapeInsertAdConfig.landscapeInsertAdEnable (横屏插入广告)
+        //   - p()  → SeriesAdConfig.enableMultiSeriesFlowAd (系列信息流广告总开关)
+        //   - p0() 不存在,旧版硬编码为 p0 的 hook 会静默 WARN 跳过
         hooks.replaceBooleanFalse(
             id = "short-series-ad-enable",
             method = resolver.findMethod(
                 "com.dragon.read.reader.ad.experiment.ExperimentUtil",
-                "q0"
+                "p"
             ),
             deoptimize = true,
         )
@@ -376,7 +382,7 @@ class AdHooks(
             id = "short-series-landscape-insert-ad",
             method = resolver.findMethod(
                 "com.dragon.read.reader.ad.experiment.ExperimentUtil",
-                "p0"
+                "q0"
             ),
         )
     }
@@ -395,7 +401,7 @@ class AdHooks(
     //
     //   Strategy: no-op the launch entry (main cut) plus the three view-mounting methods
     //   (belt-and-braces in case some other path starts the activity). All four targets
-    //   exist on both Fanqie and Hongguo (same 73332 baseline); a missing target degrades
+    //   exist on both Fanqie and Hongguo (same 73532 baseline); a missing target degrades
     //   to a WARN like every other hook.
     // ─────────────────────────────────────────────────────────────────────────
 

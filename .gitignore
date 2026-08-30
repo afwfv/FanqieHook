@@ -39,3 +39,6 @@ Thumbs.db
 LSPosed_*/
 lspd-*/
 scopes*.txt
+# Frida verification scripts (internal, not published)
+frida_verify.js
+frida_min.js

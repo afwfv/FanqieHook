@@ -1,9 +1,9 @@
 id=FanqieHook
-name=番茄 红果 版本7.3.3.32去广告
-version=v0.3.0
-versionCode=14
+name=番茄 红果 版本7.3.5.32去广告
+version=v0.4.0
+versionCode=15
 author=afwfv
-description=番茄小说 (com.dragon.read) 与红果免费短剧 (com.phoenix.read) v7.3.3.32 (versionCode 73332) 精准去广告模块。拦截阅读器 banner、视频广告、翻页信息流、章节断开广告、TopView、听书贴片、短剧暂停与热启动开屏广告，保留激励视频与金币入口，支持 LSPosed 热重载。
+description=番茄小说 (com.dragon.read) 与红果免费短剧 (com.phoenix.read) v7.3.5.32 (versionCode 73532) 精准去广告模块。拦截阅读器 banner、视频广告、翻页信息流、章节断开广告、TopView、听书贴片、短剧暂停与热启动开屏广告，保留激励视频与金币入口，支持 LSPosed 热重载。
 updateJson=https://raw.githubusercontent.com/afwfv/FanqieHook/main/update.json
 actionIcon=launcher.png
 minApiVersion=101

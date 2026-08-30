@@ -6,6 +6,12 @@
 
 ## 未发布
 
+## 0.4.0
+v0.4.0 - 适配番茄小说 7.3.5.32（versionCode 73532）
+- 全量复核 24 个 hook 目标类与方法签名，与 73532 APK 逐一比对全部命中
+- 唯一缺失类 HongguoBannerServiceImpl 为红果专属，番茄侧预期 WARN 跳过，不影响功能
+- SUPPORTED_VERSION_CODES 同步升至 73532（com.dragon.read 已实测验证；com.phoenix.read 同基线待 APK 复核）
+
 ## 0.3.0
 v0.3.0 - 红果短剧 + 开屏广告拦截
 新增红果短剧广告拦截（banner、贴片、横屏插入）与热启动开屏广告 Activity 级阻断
