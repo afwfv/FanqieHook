@@ -6,6 +6,27 @@
 
 ## 未发布
 
+## 0.6.0
+v0.6.0 - 拦截覆盖优化：按常量流证据扩充广告位名单（73532 / 73732 通用）
+- 缺口来源：对 `checkAdAvailable(position, source)` 做**反向可达性 + 常量流分析**
+  （含 position 作为参数透传的包装方法），提取出真正流入广告闸门的全部 position 常量，
+  再逐个反汇编调用点判断「被动广告位」还是「用户主动激励」
+  - 结论：73532 与 73732 流入闸门的常量集合完全相同（29 个），属长期覆盖缺口，不是 73732 回归
+- BLOCKED_POSITIONS 由 10 项扩至 21 项，新增 11 个已确认为被动广告位的位置：
+  - `comment_list_ad`（评论列表原生广告频控）、`series_comment_ad`（短剧评论广告）
+  - `story_ad`（故事/短篇插页）、`creator_ad`（创作者广告）
+  - `processed_ad`（短视频进度条插入广告，埋点名 pos=progress_ad）
+  - `landscape_short_series_ad`、`landscape_short_series_pause_ad`（横屏短剧插入/暂停）
+  - `short_series_ad`、`short_series_banner`（短剧信息流与 banner）
+  - `audio_info_flow_ad`、`audio_patch_ad`（听书信息流/贴片）
+- 新增 PRESERVED_POSITIONS 白名单，显式保留用户主动激励/金币入口：
+  `reader_gold_coin_popup`、`video_tts_ad`、`video_voice_ad`、`video_reward_gift_ad`、
+  `video_reader_end_urge_update`
+- 新增「未分类广告位发现日志」（LOG_UNLISTED_POSITIONS=true，每进程每位置仅记一次，仅打日志不改变返回值）：
+  广告位命名由服务端下发、版本间可能静默增加，该日志让每台设备都能为下一轮适配提供真实数据
+- 实机验证（OnePlus 9R / Android 14 / LSPosed v2.2.0，番茄 7.3.7.32）：
+  `blocked ad position=creator_ad source=AT via lf3.a.checkAdAvailable` —— 新增位置实测生效
+
 ## 0.5.0
 v0.5.0 - 适配番茄小说 / 红果免费短剧 7.3.7.32（versionCode 73732）
 - 修复版本门禁在 Android 14 上完全失效的问题（新增 ApkVersion：直接解析宿主 APK 的

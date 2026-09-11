@@ -186,11 +186,23 @@ class AdHooks(
             deoptimize = false,
             shouldBlock = { args ->
                 val position = args.getOrNull(0)?.toString().orEmpty()
+                val source = args.getOrNull(1)
                 val blocked = position in BLOCKED_POSITIONS
                 if (blocked) {
+                    log.info("blocked ad position=$position source=$source via $className.checkAdAvailable")
+                } else if (LOG_UNLISTED_POSITIONS &&
+                    position.isNotEmpty() &&
+                    position !in PRESERVED_POSITIONS &&
+                    reportedPositions.add(position)
+                ) {
+                    // Debug-grade discovery: the ad-position namespace is server-driven and grows
+                    // silently between releases. Anything the block list does not know about (and
+                    // is not a deliberate keep) gets reported exactly once per process, so the next
+                    // adaptation round can extend BLOCKED_POSITIONS from real device data instead
+                    // of guesswork. Log-only: the return value is unaffected.
                     log.info(
-                        "blocked ad position=$position source=${args.getOrNull(1)} " +
-                            "via $className.checkAdAvailable"
+                        "unlisted ad position=$position source=$source via $className.checkAdAvailable " +
+                            "(not blocked; report upstream so it can be classified)"
                     )
                 }
                 blocked
@@ -467,7 +479,16 @@ class AdHooks(
         // by forcing NsAdImpl.checkCanShowTopViewInMainPage / checkCanShowTopViewInReader to false
         // (both verified to still have live call sites in 73732). Removing the dead entries changes
         // no behaviour.
+        //
+        // The second group below was derived by constant-flow analysis rather than by reading the
+        // string pool: every position constant that actually reaches `checkAdAvailable` (including
+        // through pass-through wrappers) was extracted, then each call site was disassembled to
+        // classify it as a passive slot or a user-initiated flow. Both versionCodes reach the gate
+        // with the same 29 constants, i.e. this was a long-standing coverage gap and not a
+        // 7.3.7.32 regression. The gate is demonstrably live in production:
+        //   "[INFO] blocked ad position=splash_ad source=Brand via lf3.a.checkAdAvailable"
         val BLOCKED_POSITIONS = setOf(
+            // ── reader / main-page slots (v0.1 set) ──────────────────────────────
             "splash_ad",
             "page_front_ad",
             "page_middle_ad",
@@ -477,12 +498,68 @@ class AdHooks(
             "reader_disconnected_ad",
             "reader_ad_for_sati",
             "video_reader_ad",
-            // Additional positions identified in the static call graph (see report § 5.2):
-            "series_pause_ad"
+            "series_pause_ad",
+            // ── slots added in v0.6.0 from constant-flow evidence ───────────────
+            // 评论列表原生广告（NscommunityadImpl.isSatisfyFreq 频控前置检查）
+            "comment_list_ad",
+            // 短剧评论广告（r63.b / l63.d）
+            "series_comment_ad",
+            // 故事 / 短篇插页广告（StoryAdController.tryTriggerStoryAdInsert）
+            "story_ad",
+            // 创作者广告（com.dragon.read.ad.util.s0 → Args 构造）
+            "creator_ad",
+            // 短视频进度条插入广告（a93.p；埋点名为 pos=progress_ad）
+            "processed_ad",
+            // 横屏短剧插入广告 / 横屏短剧暂停广告（w73.k、h83.a）
+            "landscape_short_series_ad",
+            "landscape_short_series_pause_ad",
+            // 短剧信息流广告与短剧 banner（t83.l、BannerDependImpl.canRequestSeriesBanner）
+            "short_series_ad",
+            "short_series_banner",
+            // 听书信息流 / 贴片广告（AudioAdManager.checkInfoFlowAdAvailable / checkPatchAdAvailable）
+            "audio_info_flow_ad",
+            "audio_patch_ad"
         )
+
+        /**
+         * Positions that deliberately stay ENABLED. All of them are user-initiated reward / coin
+         * surfaces — blocking them would remove the user's ability to earn coins by watching a
+         * video, which this module explicitly preserves.
+         *
+         * Analysed call sites:
+         *   - `reader_gold_coin_popup` — 金币弹窗
+         *   - `video_tts_ad` / `video_voice_ad` — 听书激励入口（AudioInspireUtil.adUnavailable）
+         *   - `video_reward_gift_ad` — 激励视频礼包
+         *   - `video_reader_end_urge_update` — 看视频催更
+         *
+         * Listing them here (rather than only omitting them) keeps the intent explicit and stops
+         * the discovery logger from re-reporting them as unclassified.
+         */
+        val PRESERVED_POSITIONS = setOf(
+            "reader_gold_coin_popup",
+            "video_tts_ad",
+            "video_voice_ad",
+            "video_reward_gift_ad",
+            "video_reader_end_urge_update"
+        )
+
+        /**
+         * Log each previously-unseen ad position once per process (log-only; never changes the
+         * hook's return value). Purpose: the position namespace is server-driven and grows without
+         * any APK-side signal, so this turns every device into an instrument for finding the next
+         * gap. Disable if the extra INFO lines are unwanted.
+         */
+        const val LOG_UNLISTED_POSITIONS = true
 
         // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
         // to skip install-source reporting, which may affect compliance. Review before shipping.
         const val ENABLE_ATTRIBUTION_SPLASH_BYPASS = false
     }
+
+    /**
+     * Positions already reported by [LOG_UNLISTED_POSITIONS]; process-scoped so a hot reload
+     * starts a fresh discovery pass. Concurrent because hook callbacks arrive on many threads.
+     */
+    private val reportedPositions: MutableSet<String> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
 }

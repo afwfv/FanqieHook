@@ -10,7 +10,28 @@
 - 拦截短剧暂停广告
 - 拦截红果短剧 banner、贴片、横屏插入广告
 - 拦截红果热启动开屏广告（Activity 级阻断）
+- 拦截评论列表 / 短剧评论、故事插页、创作者广告、短视频进度条插入广告（v0.6.0 新增，见下）
 - 保留用户主动点击的激励视频 / 金币 / 看广告免广告按钮
+
+### 广告位覆盖（v0.6.0）
+
+`BLOCKED_POSITIONS` 由 10 项扩至 **21 项**。名单不是从字符串池猜的，而是对广告闸门
+`checkAdAvailable(position, source)` 做**反向可达性 + 常量流分析**——包括 position 作为参数
+透传的包装方法——提取出真正流入闸门的 position 常量，再逐个反汇编调用点归类。73532 与 73732
+流入闸门的常量集合完全相同（29 个），因此这是长期覆盖缺口而非版本回归。
+
+| 分类 | 位置 |
+|---|---|
+| 阅读器 / 首页 | `splash_ad`、`page_front_ad`、`page_middle_ad`、`page_end_ad`、`reader_banner`、`reader_text_link_ad`、`reader_disconnected_ad`、`reader_ad_for_sati`、`video_reader_ad`、`series_pause_ad` |
+| v0.6.0 新增 | `comment_list_ad`、`series_comment_ad`、`story_ad`、`creator_ad`、`processed_ad`、`landscape_short_series_ad`、`landscape_short_series_pause_ad`、`short_series_ad`、`short_series_banner`、`audio_info_flow_ad`、`audio_patch_ad` |
+| **显式保留**（用户主动激励） | `reader_gold_coin_popup`、`video_tts_ad`、`video_voice_ad`、`video_reward_gift_ad`、`video_reader_end_urge_update` |
+
+模块同时会把**未分类**的广告位记一条日志（每进程每位置一次，仅打日志、不影响返回值），
+便于下一轮适配直接从实机数据扩名单：
+
+```bash
+adb shell su -c 'grep -a "unlisted ad position" /data/adb/lspd/log/modules_*.log'
+```
 
 ## 兼容范围
 
@@ -23,7 +44,7 @@
 | Android | 8.0（API 26）及以上 |
 | 作用域 | `com.dragon.read`、`com.phoenix.read` |
 | 模块包名 | `dev.operit.fanqiehook` |
-| 模块版本 | v0.5.0（versionCode 16）|
+| 模块版本 | v0.6.0（versionCode 17）|
 
 > 模块针对 v7.3.7.32 / v7.3.5.32 的运行时结构适配。两个版本共用同一套 hook 实现——73732 未移动任何 hook 目标，
 > 仅混淆参数类型（`ti4.h` → `vq4.i`）与 DexKit 反查的实现类名（`fe3.a` → `lf3.a` / `yb3.a`）发生变化，
@@ -32,7 +53,7 @@
 ## 安装与使用
 
 1. 安装 LSPosed 框架。
-2. 安装 `FanqieHook-v0.5.0-release.apk`。
+2. 安装 `FanqieHook-v0.6.0-release.apk`。
 3. 在 LSPosed 中启用模块，勾选作用域 `com.dragon.read` 与 `com.phoenix.read`。
 4. 强制停止番茄小说 / 红果免费短剧后重新打开。
 
@@ -61,9 +82,13 @@ adb logcat -s LSPosedLogDaemon:V | grep FanqieHook
 | `dexindex.py` | 极简 DEX 索引器（类 → 方法名 → 原型/access flags，含接口与父类） |
 | `verify_targets.py` | 对某个 APK 逐个核验 26 个 hook 目标是否存在且签名一致 |
 | `xref.py` | 逐 hook 统计其类型族内的 `invoke-*` 调用点数量，并 diff 两版本的 ad 命名空间类 |
+| `reach.py` | 从广告闸门 `checkAdAvailable` 反向可达（BFS over 反向调用图）+ 常量流，挖出真正流入闸门的 position 常量 |
+| `argstrings.py` | 提取指定调用点的常量 String 实参（滚动 const-string 窗口） |
+| `showmethod.py` | 打印单个方法的伪反汇编（const-string + invoke + 实参），用于判断调用点语义 |
 | `check_positions.py` | 核验 `BLOCKED_POSITIONS` 的每个位置字符串在两个版本的字符串池中仍存在 |
 
-适配新版本的流程：`verify_targets.py` 全绿 → `xref.py` 确认没有 hook 变成死开关 → `check_positions.py` 无缺失
+适配新版本的流程：`verify_targets.py` 全绿 → `xref.py` 确认没有 hook 变成死开关 → `reach.py`
+枚举流入闸门的 position 并判断被动/主动 → `check_positions.py` 无缺失
 → 更新 `SUPPORTED_VERSION_CODES` 与版本号 → 实机复核 logcat。
 
 ## 免责声明
