@@ -80,6 +80,8 @@ adb logcat -s LSPosedLogDaemon:V | grep FanqieHook
 - v0.5.0 新增 73732：DEX 级复核 26 个目标类/方法签名、逐 hook 的调用点数量比对、位置字符串存在性复核
 - v0.5.0 修复版本门禁：Android 14 上两条反射路径全部失败会让门禁静默放行（FAIL_OPEN），
   现改为自行解析宿主 APK 的二进制 AndroidManifest.xml（`ApkVersion.kt`），实机读到 versionCode=73732
+- v0.6.1 修正开屏链路：此前按红果的 Activity 路径实现，实测番茄走的是 `SplashActivity` 而非
+  `OpeningScreenADActivity`，故补上 `BrandTopViewDisplayStrategy.c()` 与 `enableSeriesFeedTopViewAd()` 两道闸门
 
 ## 免责声明
 

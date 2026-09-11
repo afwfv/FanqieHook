@@ -458,6 +458,59 @@ class AdHooks(
             method = resolver.findMethod(splashActivity, "showNaturalAdView", "android.view.View"),
             hooker = Hooker { /* no-op */ },
         )
+
+        // ── 番茄侧的品牌开屏（实测补漏）────────────────────────────────────────
+        //
+        // 上面三个 OpeningScreenADActivity 的 hook 只覆盖**红果**的 Activity 路径。番茄实测
+        // 不走它：热启动时启动的是 `com.dragon.read/.pages.splash.SplashActivity`，
+        // 且全程不调用 `checkAdAvailable("splash_ad")`（真机日志无对应拦截记录），
+        // 因此「Activity 阻断 + 位置过滤」两层都拦不到番茄的品牌开屏。
+        //
+        // 真正的展示决策是 `BrandTopViewDisplayStrategy.c(AbsActivity)Z`：从调用点反汇编可见
+        // 它依次校验 Activity 未 finishing、有网络、非基础模式、`checkAdAvailable("splash_ad",
+        // "Brand")` 等条件后返回是否展示。强制返回 false 即「不展示品牌 TopView 开屏」。
+        hooks.replaceBooleanFalse(
+            id = "splash-brand-topview-strategy",
+            method = resolver.findMethod(
+                "com.dragon.read.ad.splash.BrandTopViewDisplayStrategy",
+                "c",
+                "com.dragon.read.base.AbsActivity"
+            ),
+            deoptimize = true,
+        )
+        // 系列/单列 TopView 开屏总开关（红果短剧单列 TopView 亦读此开关）。
+        hooks.replaceBooleanFalse(
+            id = "splash-enable-series-feed-topview",
+            method = resolver.findMethod(nsAd, "enableSeriesFeedTopViewAd"),
+            deoptimize = true,
+        )
+
+        // ── 探针（仅打日志，不改变任何返回值）──────────────────────────────────
+        // 开屏链路分散在多个混淆类里，靠静态分析只能缩小范围。这些 installLogger 会调用
+        // chain.proceed()，行为与不装 hook 完全一致，只为在真机日志里留下「谁被调用了」。
+        if (SPLASH_PROBE) {
+            hooks.installLogger(
+                id = "probe:splash-activity-oncreate",
+                method = resolver.findMethod("com.dragon.read.pages.splash.SplashActivity", "onCreate", "android.os.Bundle"),
+            )
+            hooks.installLogger(
+                id = "probe:brand-strategy-a",
+                method = resolver.findMethod("com.dragon.read.ad.splash.BrandTopViewDisplayStrategy", "a"),
+            )
+            hooks.installLogger(
+                id = "probe:brand-strategy-b",
+                method = resolver.findMethod("com.dragon.read.ad.splash.BrandTopViewDisplayStrategy", "b", "boolean"),
+            )
+            hooks.installLogger(
+                id = "probe:navigator-open-opening-ad",
+                method = resolver.findMethod(
+                    "com.dragon.read.component.j",
+                    "openOpeningScreenAdActivity",
+                    "android.content.Context",
+                    "com.dragon.read.report.PageRecorder"
+                ),
+            )
+        }
     }
 
     private companion object {
@@ -544,6 +597,14 @@ class AdHooks(
          * gap. Disable if the extra INFO lines are unwanted.
          */
         const val LOG_UNLISTED_POSITIONS = true
+
+        /**
+         * Log-only instrumentation of the splash chain (calls `chain.proceed()`, so behaviour is
+         * unchanged). The splash decision is spread over several obfuscated classes whose
+         * class/method names move between releases; these probes make the real device log name the
+         * path that actually ran. Set to false once the splash path is pinned down.
+         */
+        const val SPLASH_PROBE = true
 
         // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
         // to skip install-source reporting, which may affect compliance. Review before shipping.

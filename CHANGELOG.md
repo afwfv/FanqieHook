@@ -6,6 +6,25 @@
 
 ## 未发布
 
+## 0.6.1
+v0.6.1 - 修正番茄开屏广告的链路假设，并补上品牌开屏闸门
+- 问题：v0.1.0~v0.6.0 的「开屏阻断」是按红果的 Activity 路径做的
+  （NsAdImpl#openOpeningScreenAdActivity → OpeningScreenADActivity）。实机取证发现**番茄根本不走这条路**：
+  热启动时启动的是 `com.dragon.read/.pages.splash.SplashActivity`，且全程不调用
+  `checkAdAvailable("splash_ad")`，所以「Activity 阻断 + 位置过滤」两层对番茄品牌开屏都是空的
+  —— 日志会显示 hook installed，但广告照旧
+- 静态取证：`NsAppNavigator` 接口的唯一实现类是 `com.dragon.read.component.j`（不是 NsAdImpl）；
+  `NsAdImpl#openOpeningScreenAdActivity` 方法体内为 `new Intent(ctx, OpeningScreenADActivity.class)` +
+  `startActivity`，即它只管红果那条 Activity 路径
+- 新增 hook：
+  - `BrandTopViewDisplayStrategy.c(AbsActivity)Z` → false —— 品牌开屏真正的展示决策
+    （反汇编可见其依次校验 Activity 未 finishing、有网络、非基础模式、checkAdAvailable("splash_ad","Brand")）
+  - `NsAdImpl.enableSeriesFeedTopViewAd()Z` → false —— 系列 / 单列 TopView 开屏总开关
+- 新增 4 个**只打日志、不改变行为**的探针（`SplashActivity#onCreate`、`BrandTopViewDisplayStrategy#a/#b`、
+  `component.j#openOpeningScreenAdActivity`），用于在实机日志里定位实际执行的开屏链路；
+  由 `SPLASH_PROBE` 开关控制，确认链路后再关闭
+- 状态：修复已发出，但**实机效果尚待确认**；探针保留在 v0.6.1 内以便下一轮定位
+
 ## 0.6.0
 v0.6.0 - 拦截覆盖优化：按常量流证据扩充广告位名单（73532 / 73732 通用）
 - 缺口来源：对 `checkAdAvailable(position, source)` 做**反向可达性 + 常量流分析**
