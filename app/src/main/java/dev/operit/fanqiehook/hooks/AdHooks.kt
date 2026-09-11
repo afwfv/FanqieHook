@@ -6,12 +6,24 @@ import dev.operit.fanqiehook.ModuleLog
 import io.github.libxposed.api.XposedInterface.Hooker
 
 /**
- * All ad-related hooks for `com.dragon.read` versionCode 73532.
+ * All ad-related hooks for `com.dragon.read` versionCodes 73532 (v7.3.5.32) and 73732 (v7.3.7.32).
  *
- * Every hook target below was validated against the APK (Fanqie v7.3.5.32, versionCode 73532;
- * see the reverse-engineering report § 5; smali line numbers are recorded in the static
- * evidence table § 6.1). Do not rename or remove methods without re-running reverse
- * engineering against the new APK first.
+ * Audit status (DEX-level, re-run for every supported versionCode — tooling and raw output live in
+ * `FANQIE/ADAPT_73532/` in the analysis workspace):
+ *
+ *   | versionCode | host                 | class/method targets                            | invoke sites |
+ *   |-------------|----------------------|-------------------------------------------------|--------------|
+ *   | 73532       | 番茄 com.dragon.read | 25/26 (only Hongguo-only HongguoBannerServiceImpl absent) | baseline |
+ *   | 73732       | 番茄 com.dragon.read | 25/26 (same Hongguo-only miss)                  | identical to 73532 |
+ *   | 73732       | 红果 com.phoenix.read| 26/26                                           | n/a |
+ *
+ * No hook target moved between 73532 and 73732, so one implementation covers both. What did drift:
+ *   - `SeriesPauseAdImpl.canShowPauseAd`'s obfuscated parameter (`so4.h` on Fanqie 73532 →
+ *     `vq4.i` on Fanqie 73732) — handled by [ClassResolver.findMethodIgnoringParams].
+ *   - The DexKit-resolved `NsAdConfigManagerApi` impl class (`fe3.a` → `lf3.a` on Fanqie,
+ *     `yb3.a` on Hongguo) — handled by resolving through the interface.
+ *   - One `video_reader_ad` string-literal reference disappeared in 73732; the position itself
+ *     is still present and still filtered.
  *
  * Position-string policy:
  *   The string parameter to [BLOCKED_POSITIONS] is matched against `String position` arguments
@@ -113,9 +125,10 @@ class AdHooks(
     //   SeriesPauseAdImpl.enablePauseAd()Z            (smali line 343)
     //   SeriesPauseAdImpl.canShowPauseAd(ti4.h)Z      (smali line 104)
     //
-    //   `canShowPauseAd` takes an obfuscated interface (ti4.h) as its single argument. The
-    //   interface name changes between Fanqie releases, so we resolve by name + return type
-    //   via [ClassResolver.findMethodIgnoringParams] to remain version-resilient.
+    //   `canShowPauseAd` takes an obfuscated interface (ti4.h / so4.h / vq4.i depending on
+    //   version and host) as its single argument. The interface name changes between Fanqie
+    //   releases, so we resolve by name + return type via [ClassResolver.findMethodIgnoringParams]
+    //   to remain version-resilient.
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun installSeriesPauseHooks() {
@@ -140,8 +153,9 @@ class AdHooks(
     //
     //   Multiple call sites are hit. The second implementation lives on a class that implements
     //   `com.dragon.read.ad.manager.NsAdConfigManagerApi` and serves as the ad-config cache
-    //   front-end. The implementation class is obfuscated (`h83.a` in 73532, will likely be
-    //   renamed in future releases), so we resolve it through DexKit by interface name.
+    //   front-end. The implementation class is obfuscated (`fe3.a` in 73532, `lf3.a` in Fanqie
+    //   73732, `yb3.a` in Hongguo 73732 — it is renamed every release), so we resolve it through
+    //   DexKit by interface name.
     //   Hooking both gives defence-in-depth; the DexKit lookup degrades to a no-op if the bridge
     //   fails to initialise (logged WARN) or no impl class can be located.
     // ─────────────────────────────────────────────────────────────────────────
@@ -366,10 +380,11 @@ class AdHooks(
         )
         // 短剧广告总开关 + 横屏插入广告开关
         //
-        // 验证结果 (versionCode 73532, 番茄+红果):
+        // 验证结果 (versionCodes 73532 与 73732, 番茄+红果 均有调用点):
         //   - q0() → ShortSeriesLandscapeInsertAdConfig.landscapeInsertAdEnable (横屏插入广告)
         //   - p()  → SeriesAdConfig.enableMultiSeriesFlowAd (系列信息流广告总开关)
         //   - p0() 不存在,旧版硬编码为 p0 的 hook 会静默 WARN 跳过
+        // 73732 复核: 两者调用点数量与 73532 完全一致 (p: 8, q0: 6), 无需改动。
         hooks.replaceBooleanFalse(
             id = "short-series-ad-enable",
             method = resolver.findMethod(
@@ -443,6 +458,15 @@ class AdHooks(
         // Passively displayed positions; USER-INITIATED reward / coin positions are intentionally
         // absent. Mirrors the previous AdHooks.kt whitelist. Additions are made in the report's
         // § 5.3 table; review before merging.
+        //
+        // Audited against both supported versionCodes (73532 and 73732): every string below is
+        // present in both APK string pools, so the filter keeps matching after an app update.
+        //
+        // `topview_main` / `topview_reader` used to be listed here, but neither string exists in
+        // ANY version's string pool — they could never match. TopView is cut structurally instead,
+        // by forcing NsAdImpl.checkCanShowTopViewInMainPage / checkCanShowTopViewInReader to false
+        // (both verified to still have live call sites in 73732). Removing the dead entries changes
+        // no behaviour.
         val BLOCKED_POSITIONS = setOf(
             "splash_ad",
             "page_front_ad",
@@ -454,8 +478,6 @@ class AdHooks(
             "reader_ad_for_sati",
             "video_reader_ad",
             // Additional positions identified in the static call graph (see report § 5.2):
-            "topview_main",
-            "topview_reader",
             "series_pause_ad"
         )
 

@@ -22,8 +22,8 @@ import dev.operit.fanqiehook.hooks.AdHooks
  *   - Package name must be one of [TARGET_PACKAGES] (番茄小说 / 红果免费短剧).
  *   - Process name must equal the package name, i.e. the host's main process (do NOT touch
  *     `:push`, `:widgetProvider`, `:miniappX`, etc. – see § 6 of the analysis report).
- *   - versionCode must equal the value registered for that package in
- *     [SUPPORTED_VERSION_CODES] exactly. A new APK version that refactors a single class will
+ *   - versionCode must be one of the values registered for that package in
+ *     [SUPPORTED_VERSION_CODES]. A new APK version that refactors a single class will
  *     silently break hardcoded hooks; refuse to install instead of crashing inside the host app.
  */
 class FanqieModule : XposedModule() {
@@ -69,9 +69,9 @@ class FanqieModule : XposedModule() {
             return
         }
 
-        val expectedVersionCode = SUPPORTED_VERSION_CODES.getValue(packageName)
+        val supportedVersionCodes = SUPPORTED_VERSION_CODES.getValue(packageName)
         val versionCode = readVersionCode(param)
-        if (versionCode != expectedVersionCode) {
+        if (versionCode !in supportedVersionCodes) {
             if (FAIL_OPEN && versionCode == -1L) {
                 log.warn(
                     "versionCode unknown (hidden-API blocked on this device). FAIL_OPEN=true; " +
@@ -80,8 +80,9 @@ class FanqieModule : XposedModule() {
             } else {
                 log.warn(
                     "unsupported versionCode=$versionCode for $packageName; " +
-                        "expected=$expectedVersionCode. " +
-                        "Refusing to install hooks to avoid version mismatch."
+                        "supported=${supportedVersionCodes.sorted()} " +
+                        "(this build supports only versionCodes that had a full hook-target " +
+                        "audit). Refusing to install hooks to avoid version mismatch."
                 )
                 return
             }
@@ -134,14 +135,26 @@ class FanqieModule : XposedModule() {
      * Read the host app's `versionCode` with multiple strategies, ordered by independence from
      * host state.
      *
-     *  1. [PackageManager.getPackageArchiveInfo] – public static API, no Context required,
-     *     works around the Android 14+ hidden-API greylist that blocks reflective access to
-     *     `ActivityThread.currentApplication()`.
-     *  2. `ActivityThread.currentApplication()` reflection – the legacy path; kept as fallback.
-     *  3. Return `-1` so the fail-closed gate can decide whether to refuse hook installation.
+     *  1. [ApkVersion.readVersionCode] – parse `versionCode` out of the host APK's binary
+     *     AndroidManifest.xml. Public formats only (ZIP + AXML chunks), no Context, no hidden API;
+     *     this is the strategy that actually works on Android 14+ (see [ApkVersion] for the
+     *     measured failure of strategies 2 and 3 there).
+     *  2. [PackageManager.getPackageArchiveInfo] – public static API, no Context required.
+     *  3. `ActivityThread.currentApplication()` reflection – the legacy path; retained as a
+     *     fallback but unusable at this lifecycle stage (the Application does not exist yet).
+     *  4. Return `-1` so the fail-closed gate can decide whether to refuse hook installation.
      */
     private fun readVersionCode(param: PackageReadyParam): Long {
-        // Strategy 1: static PackageManager.getPackageArchiveInfo(sourceDir, flags)
+        // Strategy 1: parse the host APK's AndroidManifest.xml directly.
+        val viaManifest = runCatching {
+            ApkVersion.readVersionCode(param.applicationInfo.sourceDir)
+        }.getOrElse { e ->
+            log.warn("manifest versionCode parse failed: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        if (viaManifest != null) return viaManifest
+
+        // Strategy 2: static PackageManager.getPackageArchiveInfo(sourceDir, flags)
         val viaArchive = runCatching {
             val apkPath = param.applicationInfo.sourceDir
             val pmClass = Class.forName(
@@ -163,7 +176,7 @@ class FanqieModule : XposedModule() {
         }
         if (viaArchive != null) return viaArchive
 
-        // Strategy 2: reflect into ActivityThread.currentApplication() → PackageManager
+        // Strategy 3: reflect into ActivityThread.currentApplication() → PackageManager
         val viaActivityThread = runCatching {
             val activityThread = Class.forName(
                 "android.app.ActivityThread",
@@ -197,14 +210,24 @@ class FanqieModule : XposedModule() {
         // `com.dragon.read`  – 番茄小说
         // `com.phoenix.read` – 红果免费短剧
         //
-        // Both are built from the same ByteDance "dragon" baseline (identical versionCode 73532)
-        // and still ship the ad classes under the `com.dragon.read.*` namespace, so a single
-        // AdHooks implementation covers both. Obfuscated delegate names DO differ between them
-        // (`h83.a` vs `n83.a` for the NsAdConfigManagerApi impl), which is exactly why those are
-        // resolved through DexKit by interface rather than by hardcoded name.
+        // Both are built from the same ByteDance "dragon" baseline (identical versionCode per
+        // release) and still ship the ad classes under the `com.dragon.read.*` namespace, so a
+        // single AdHooks implementation covers both. Obfuscated delegate names DO differ between
+        // them and between releases (e.g. the NsAdConfigManagerApi impl is `fe3.a` on Fanqie
+        // 73532, `lf3.a` on Fanqie 73732, `yb3.a` on Hongguo 73732), which is exactly why those
+        // are resolved through DexKit by interface rather than by hardcoded name.
+        //
+        // Audit history (DEX-level target + call-site verification, see
+        // FANQIE/ADAPT_73532/ in the analysis workspace):
+        //   73532 (7.3.5.32) Fanqie + Hongguo – 26 targets, all class/method signatures match;
+        //                    Fanqie side misses only the Hongguo-only HongguoBannerServiceImpl
+        //   73732 (7.3.7.32) Fanqie – 25/26 (same Hongguo-only miss), every hook's invoke-site
+        //                    count inside the target's type family identical to 73532
+        //   73732 (7.3.7.32) Hongguo – 26/26
+        // Both versionCodes share one AdHooks implementation because no target moved between them.
         val SUPPORTED_VERSION_CODES = mapOf(
-            "com.dragon.read" to 73532L,
-            "com.phoenix.read" to 73532L
+            "com.dragon.read" to setOf(73532L, 73732L),
+            "com.phoenix.read" to setOf(73532L, 73732L)
         )
 
         val TARGET_PACKAGES = SUPPORTED_VERSION_CODES.keys
