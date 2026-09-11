@@ -53,7 +53,7 @@ adb shell su -c 'grep -a "unlisted ad position" /data/adb/lspd/log/modules_*.log
 ## 安装与使用
 
 1. 安装 LSPosed 框架。
-2. 安装 `FanqieHook-v0.6.0-release.apk`。
+2. 安装 Release 里的 `app-release.apk`（或直接在 LSPosed 模块中心安装/更新）。
 3. 在 LSPosed 中启用模块，勾选作用域 `com.dragon.read` 与 `com.phoenix.read`。
 4. 强制停止番茄小说 / 红果免费短剧后重新打开。
 
