@@ -64,6 +64,14 @@ adb logcat -s LSPosedLogDaemon:V | grep FanqieHook
 # 应看到 "hook installed:" 记录，实际使用时出现 "blocked ad position=..."
 ```
 
+> 模块日志默认写进 LSPosed 自己的日志文件而非 logcat，用这条更准：
+> `adb shell su -c 'grep -a FanqieHook /data/adb/lspd/log/modules_*.log | tail -60'`
+
+> **开发者注意：仓库里有两套签名密钥。** CI 发布版用固定 keystore（SHA-1 `b5671e7e…`），
+> 而本机 `./gradlew :app:assembleRelease` 未设 `KEYSTORE_PATH` 时会回退 `~/.android/debug.keystore`
+> （SHA-1 `539f6674…`）。两者签名不同，**不能互相覆盖安装**，混装前需先卸载。
+> 对外发布请一律用 CI 产物，否则模块中心老用户会因签名冲突装不上。
+
 ## 已验证
 
 - 番茄侧与红果侧 hook 全部安装成功（含 DexKit 反查实现类：番茄 `fe3.a`/`lf3.a`、红果 `yb3.a`）
