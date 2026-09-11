@@ -8,8 +8,7 @@ import io.github.libxposed.api.XposedInterface.Hooker
 /**
  * All ad-related hooks for `com.dragon.read` versionCodes 73532 (v7.3.5.32) and 73732 (v7.3.7.32).
  *
- * Audit status (DEX-level, re-run for every supported versionCode — tooling and raw output live in
- * `FANQIE/ADAPT_73532/` in the analysis workspace):
+ * Audit status (DEX-level; re-run the whole target audit for every supported versionCode):
  *
  *   | versionCode | host                 | class/method targets                            | invoke sites |
  *   |-------------|----------------------|-------------------------------------------------|--------------|
@@ -27,8 +26,7 @@ import io.github.libxposed.api.XposedInterface.Hooker
  *
  * Position-string policy:
  *   The string parameter to [BLOCKED_POSITIONS] is matched against `String position` arguments
- *   taken at runtime. Whitelist user-initiated reward/coin flows so they remain functional
- *   (see report § 5.3).
+ *   taken at runtime. Whitelist user-initiated reward/coin flows so they remain functional.
  */
 class AdHooks(
     private val hooks: HookManager,
@@ -56,9 +54,9 @@ class AdHooks(
 
     // ─────────────────────────────────────────────────────────────────────────
     // 1. Reader hooks
-    //   NsAdImpl.needReadFlowAdLine(ReaderClient)Z   (smali line 21871)
-    //   NsAdImpl.canReaderVideoAdShow()Z            (smali line 1585)
-    //   ReaderAdManager.canLoadAd(String)Z          (smali line 4598)
+    //   NsAdImpl.needReadFlowAdLine(ReaderClient)Z
+    //   NsAdImpl.canReaderVideoAdShow()Z
+    //   ReaderAdManager.canLoadAd(String)Z
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun installReaderHooks() {
@@ -92,8 +90,8 @@ class AdHooks(
 
     // ─────────────────────────────────────────────────────────────────────────
     // 2. TopView hooks
-    //   NsAdImpl.checkCanShowTopViewInMainPage(AbsActivity)Z                  (smali line 3414)
-    //   NsAdImpl.checkCanShowTopViewInReader(AbsActivity, ReaderClient, String)Z  (smali line 3430)
+    //   NsAdImpl.checkCanShowTopViewInMainPage(AbsActivity)Z
+    //   NsAdImpl.checkCanShowTopViewInReader(AbsActivity, ReaderClient, String)Z
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun installTopViewHooks() {
@@ -122,8 +120,8 @@ class AdHooks(
 
     // ─────────────────────────────────────────────────────────────────────────
     // 3. Short-series pause-ad hooks
-    //   SeriesPauseAdImpl.enablePauseAd()Z            (smali line 343)
-    //   SeriesPauseAdImpl.canShowPauseAd(ti4.h)Z      (smali line 104)
+    //   SeriesPauseAdImpl.enablePauseAd()Z
+    //   SeriesPauseAdImpl.canShowPauseAd(ti4.h)Z
     //
     //   `canShowPauseAd` takes an obfuscated interface (ti4.h / so4.h / vq4.i depending on
     //   version and host) as its single argument. The interface name changes between Fanqie
@@ -148,7 +146,7 @@ class AdHooks(
     // ─────────────────────────────────────────────────────────────────────────
     // 4. Position filter (the "surgical" hook — most defensive)
     //
-    //   NsAdImpl.checkAdAvailable(String position, String source)Z                (smali line 3385)
+    //   NsAdImpl.checkAdAvailable(String position, String source)Z
     //   <NsAdConfigManagerApi impl>.checkAdAvailable(String, String)Z              (impl = h83.a in 73532)
     //
     //   Multiple call sites are hit. The second implementation lives on a class that implements
@@ -212,8 +210,8 @@ class AdHooks(
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. VIP entrance hooks
-    //   NsVipImpl.canShowVipEntranceHere(VipEntrance)Z  (smali line 877)
-    //   NsVipImpl.canShowVipEntranceInAd()Z            (smali line 956)
+    //   NsVipImpl.canShowVipEntranceHere(VipEntrance)Z
+    //   NsVipImpl.canShowVipEntranceInAd()Z
     //
     //   Cosmetic only: hides VIP upsell entry points; does NOT touch entitlement data, VipInfoModel,
     //   or any server-validated VIP flag.
@@ -239,7 +237,7 @@ class AdHooks(
 
     // ─────────────────────────────────────────────────────────────────────────
     // 6. ReaderAdManager extended hooks
-    //   needInterceptFetchAd(String)Z  (smali line 7918)
+    //   needInterceptFetchAd(String)Z
     //
     //   When `canLoadAd` already returns false, `needInterceptFetchAd` is the second line of defence
     //   that decides whether to actually issue the network request. Hooking it is safer than hooking
@@ -264,11 +262,6 @@ class AdHooks(
     //   We DO NOT blanket-disable them (reward/coin flows rely on them); we only force the
     //   passive "isXxxAvailable" flags to false so the entry-point UI hides the slot.
     //
-    //   smali line numbers (NsAdImpl):
-    //     - disableAdGift()Z          (line 5269)
-    //     - inspireAdDisable()Z       (similar name region; resolved via reflection)
-    //     - disableBannerDismissAnimation()Z  (line 5305)
-    //
     //   If a method name turns out not to exist on NsAdImpl in a future version, [resolver.findMethod]
     //   returns null and [HookManager.replaceBooleanFalse] logs a WARN. No silent skip.
     // ─────────────────────────────────────────────────────────────────────────
@@ -292,7 +285,7 @@ class AdHooks(
     // ─────────────────────────────────────────────────────────────────────────
     // 8. Experimental splash attribution hook
     //
-    //   AttributionManager.hasHitAttribution()Z   (smali line 2954)
+    //   AttributionManager.hasHitAttribution()Z
     //
     //   Defaults to OFF. Splash attribution is the channel by which the splash ad tracks
     //   installation source. Returning false skips it, but the splash ad may still show.
@@ -313,18 +306,19 @@ class AdHooks(
     // ─────────────────────────────────────────────────────────────────────────
     // 9. Audio-book ad hooks (听书贴片广告)
     //
-    //   NsAdImpl.enableRequestAudioInfoFlowAd()Z   (smali lines 5248-5274)
-    //   NsAdImpl.enableRequestAudioPatchAd()Z      (smali lines 5276-5302)
+    //   NsAdImpl.enableRequestAudioInfoFlowAd()Z
+    //   NsAdImpl.enableRequestAudioPatchAd()Z
     //
     //   Both are thin delegates: they read `BsAudioAdService.IMPL` and call the
-    //   interface method if the service is present, else return false. Verified via
-    //   `mt_apk_dex_xref` (methodResolution=dispatch) that BsAudioAdService's two
+    //   interface method if the service is present, else return false. Call-site analysis
+    //   (invoke-site counting, interface dispatch included) shows BsAudioAdService's two
     //   methods are invoked ONLY from NsAdImpl — no business code calls the service
     //   singleton directly, so hooking NsAdImpl is a complete entry-point cut.
     //
     //   These two gates decide whether 听书 audio flow and audiobook patch slots are wired
-    //   up to the ad SDK. They are NOT covered by BLOCKED_POSITIONS (听书 uses its own
-    //   position namespace inside the audio module, not the reader-side `*_ad` strings).
+    //   up to the ad SDK. The audio module uses its own position namespace, so in addition
+    //   to these two switches the positions `audio_info_flow_ad` / `audio_patch_ad` are
+    //   listed in [BLOCKED_POSITIONS] as a second line of defence.
     //   Forcing both to false cuts the audio-book ad pipeline at the entry point without
     //   touching reward / coin flows. Same resilience pattern as section 7 — if either
     //   method is renamed in a future build, [resolver.findMethod] returns null and the
@@ -468,8 +462,8 @@ class AdHooks(
 
     private companion object {
         // Passively displayed positions; USER-INITIATED reward / coin positions are intentionally
-        // absent. Mirrors the previous AdHooks.kt whitelist. Additions are made in the report's
-        // § 5.3 table; review before merging.
+        // absent. Additions must be justified by a call-site analysis of
+        // `checkAdAvailable(position, source)` — see the derivation note further down.
         //
         // Audited against both supported versionCodes (73532 and 73732): every string below is
         // present in both APK string pools, so the filter keeps matching after an app update.

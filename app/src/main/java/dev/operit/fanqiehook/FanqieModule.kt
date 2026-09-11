@@ -21,7 +21,7 @@ import dev.operit.fanqiehook.hooks.AdHooks
  * Safety gates applied BEFORE installing any hook (fail-closed):
  *   - Package name must be one of [TARGET_PACKAGES] (番茄小说 / 红果免费短剧).
  *   - Process name must equal the package name, i.e. the host's main process (do NOT touch
- *     `:push`, `:widgetProvider`, `:miniappX`, etc. – see § 6 of the analysis report).
+ *     `:push`, `:widgetProvider`, `:miniappX`, etc.).
  *   - versionCode must be one of the values registered for that package in
  *     [SUPPORTED_VERSION_CODES]. A new APK version that refactors a single class will
  *     silently break hardcoded hooks; refuse to install instead of crashing inside the host app.
@@ -217,8 +217,7 @@ class FanqieModule : XposedModule() {
         // 73532, `lf3.a` on Fanqie 73732, `yb3.a` on Hongguo 73732), which is exactly why those
         // are resolved through DexKit by interface rather than by hardcoded name.
         //
-        // Audit history (DEX-level target + call-site verification, see
-        // FANQIE/ADAPT_73532/ in the analysis workspace):
+        // Audit history (DEX-level target + call-site verification performed for each entry):
         //   73532 (7.3.5.32) Fanqie + Hongguo – 26 targets, all class/method signatures match;
         //                    Fanqie side misses only the Hongguo-only HongguoBannerServiceImpl
         //   73732 (7.3.7.32) Fanqie – 25/26 (same Hongguo-only miss), every hook's invoke-site

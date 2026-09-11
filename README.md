@@ -81,24 +81,6 @@ adb logcat -s LSPosedLogDaemon:V | grep FanqieHook
 - v0.5.0 修复版本门禁：Android 14 上两条反射路径全部失败会让门禁静默放行（FAIL_OPEN），
   现改为自行解析宿主 APK 的二进制 AndroidManifest.xml（`ApkVersion.kt`），实机读到 versionCode=73732
 
-## 适配工具链
-
-`apk-reverse` 之外，本仓库的版本适配使用一套 DEX 级核验脚本（位于分析工作区 `FANQIE/ADAPT_73532/`）：
-
-| 脚本 | 作用 |
-|---|---|
-| `dexindex.py` | 极简 DEX 索引器（类 → 方法名 → 原型/access flags，含接口与父类） |
-| `verify_targets.py` | 对某个 APK 逐个核验 26 个 hook 目标是否存在且签名一致 |
-| `xref.py` | 逐 hook 统计其类型族内的 `invoke-*` 调用点数量，并 diff 两版本的 ad 命名空间类 |
-| `reach.py` | 从广告闸门 `checkAdAvailable` 反向可达（BFS over 反向调用图）+ 常量流，挖出真正流入闸门的 position 常量 |
-| `argstrings.py` | 提取指定调用点的常量 String 实参（滚动 const-string 窗口） |
-| `showmethod.py` | 打印单个方法的伪反汇编（const-string + invoke + 实参），用于判断调用点语义 |
-| `check_positions.py` | 核验 `BLOCKED_POSITIONS` 的每个位置字符串在两个版本的字符串池中仍存在 |
-
-适配新版本的流程：`verify_targets.py` 全绿 → `xref.py` 确认没有 hook 变成死开关 → `reach.py`
-枚举流入闸门的 position 并判断被动/主动 → `check_positions.py` 无缺失
-→ 更新 `SUPPORTED_VERSION_CODES` 与版本号 → 实机复核 logcat。
-
 ## 免责声明
 
 仅供学习研究，绕过广告可能违反番茄小说 / 红果《用户协议》。
