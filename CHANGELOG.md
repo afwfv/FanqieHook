@@ -6,6 +6,23 @@
 
 ## 未发布
 
+## 0.6.3
+v0.6.3 - 体积优化：APK 1.84 MB → 0.47 MB（-74%）
+- 去掉无用 ABI：宿主（番茄 73532 / 73732、红果同基线）实测**只打包 arm64-v8a**，
+  模块侧的 libdexkit.so 也只需要这一个 ABI，x86 / x86_64 / armeabi-v7a 纯属死重量
+- 开启 R8 收缩 + 资源收缩：DEX 由 2.52 MB 降到 **570 KB**
+  （模块自身代码仅 ~15 KB，其余是 Kotlin 标准库 ≈620 KB 与 DexKit ≈172 KB 的 code 字节）
+- 保留规则要点（见 app/proguard-rules.pro）：
+  - `META-INF/xposed/java_init.list` 是**按类名字符串**引用入口的，入口类必须整类保留
+  - DexKit 的原生侧会通过 JNI 按类名 + 方法签名回调 Java 对象，JNI 符号查找不走 R8 映射表，
+    因此该包必须整包保留（否则表现为运行期 UnsatisfiedLinkError 或静默返回空结果）
+  - libxposed API 由框架运行时提供，需抑制警告并保留重写方法的签名
+- 清理：移除 v0.6.1 为定位开屏链路临时加的 4 个只读探针与 `HookManager.installLogger`
+  （链路已由 `canShowScreenAd` 定位完成，不再需要）
+- 实机验证（OnePlus 9R / Android 14 / LSPosed v2.2.0 / 番茄 7.3.7.32）：
+  R8 版本下 DexKit 接口反查（`lf3.a` / `ua3.f`）与全部 hook 正常，
+  `blocked fullscreen-ad gate: NsUtilsDependImpl.canShowScreenAd` 照旧命中
+
 ## 0.6.2
 v0.6.2 - 找到并挂上开屏/全屏广告的「根闸」（canShowScreenAd）
 - 结论修正：番茄的开屏与全屏福利广告**既不经过** NsAdImpl 的开屏位置，**也不经过**

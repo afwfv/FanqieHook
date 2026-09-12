@@ -13,8 +13,16 @@ android {
         applicationId = "dev.operit.fanqiehook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "0.6.2"
+        versionCode = 20
+        versionName = "0.6.3"
+
+        // DexKit 的 libdexkit.so 必须在宿主进程内加载，因此只需要宿主实际使用的 ABI。
+        // 已核验：番茄小说 73532 与 73732 的 APK 都只打包 arm64-v8a（117 / 116 个 .so 全在
+        // arm64-v8a 下），红果同基线。x86 / x86_64 只对模拟器有意义，armeabi-v7a 则永远
+        // 用不上——宿主是 arm64-only，32 位设备根本装不上宿主。
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     signingConfigs {
@@ -33,9 +41,15 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            // LSPosed modules are loaded by the framework at runtime; R8 / shrinking must be
-            // disabled to keep all reflective targets intact.
+            // R8 收缩：本模块 APK 的体积几乎全在 Kotlin 标准库与 DexKit 里
+            // （自身代码仅 ~15 KB）。开启后必须配合 proguard-rules.pro 的保留规则——
+            // 尤其是 java_init.list 按类名引用的入口类，以及 DexKit 会被 JNI 按签名回调的包。
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             signingConfig = if (System.getenv("KEYSTORE_PATH") != null)
                 signingConfigs.getByName("ci") else signingConfigs.getByName("debug")
         }

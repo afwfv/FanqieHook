@@ -58,8 +58,9 @@ adb shell su -c 'grep -a "unlisted ad position" /data/adb/lspd/log/modules_*.log
 | 实机复核 | OnePlus 9R / Android 14 / LSPosed v2.2.0：番茄 7.3.7.32 与红果 7.3.7.32 均通过版本门禁（versionCode=73732），hook 安装成功 |
 | Android | 8.0（API 26）及以上 |
 | 作用域 | `com.dragon.read`、`com.phoenix.read` |
+| 体积 | **0.47 MB**（v0.6.3 起；此前 1.84 MB）。宿主只打包 arm64-v8a，模块侧 DexKit 同理；DEX 经 R8 收缩后 570 KB |
 | 模块包名 | `dev.operit.fanqiehook` |
-| 模块版本 | v0.6.0（versionCode 17）|
+| 模块版本 | v0.6.3（versionCode 20）|
 
 > 模块针对 v7.3.7.32 / v7.3.5.32 的运行时结构适配。两个版本共用同一套 hook 实现——73732 未移动任何 hook 目标，
 > 仅混淆参数类型（`ti4.h` → `vq4.i`）与 DexKit 反查的实现类名（`fe3.a` → `lf3.a` / `yb3.a`）发生变化，

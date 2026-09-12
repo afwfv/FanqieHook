@@ -105,25 +105,6 @@ class HookManager(
         })
     }
 
-    /**
-     * Install a logger hook: invokes the original and logs the call. Useful for dynamic validation
-     * during the first deployment round.
-     */
-    fun installLogger(
-        id: String,
-        method: Method?,
-        deoptimize: Boolean = false
-    ): HookHandle? {
-        if (method == null) {
-            log.warn("skip log hook $id (method not found)")
-            return null
-        }
-        return installInternal(id, method, deoptimize, Hooker { chain ->
-            log.debug("$id invoked args=${chain.args}")
-            chain.proceed()
-        })
-    }
-
     private fun installInternal(
         id: String,
         method: Method,
