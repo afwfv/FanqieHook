@@ -24,12 +24,17 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 
 ## 0.8.1
 v0.8.1 - 适配番茄小说 7.3.7.32（versionCode 73732）、7.3.7.18（73718）
+- **番茄更新后不再需要重新适配**：以前版本号不在支持列表里就一条 hook 都不装，番茄一升级
+  模块就变成"装了但完全没效果"，必须等适配。现在改成逐条安装：某条规则的目标没了，只跳过
+  那一条并在日志里记下来，其余照常生效——升级最多是少几条效果，不会整体失效
 - 新增支持 7.3.7.18（73718）：此前这个版本会被版本校验直接拒绝，模块加载后一个 hook 也不装，
   表现就是"装了但完全没效果"
 - 新增两种排查渠道：logcat（`adb logcat -s FanqieHook`）与宿主 cache 目录下的
   `fanqiehook.log` 状态文件。部分 LSPosed 版本不写模块日志、部分设备还关闭了 logcat，
   有状态文件时仍能确认模块是否生效：
   `adb shell su -c 'cat /data/data/com.dragon.read/cache/fanqiehook.log'`
+- 安装结果会汇总成一行 `install summary: hooks installed=N skipped=M`，没装上的会列出名字，
+  反馈问题时带上这一行就能定位
 
 ## 0.8.0
 v0.8.0 - 适配番茄小说 7.3.7.32（versionCode 73732）

@@ -443,13 +443,14 @@ class AdHooks(
                 "enableSdkSettings"
             ),
         )
-        // 红果专属 banner 服务
+        // 红果专属 banner 服务（番茄侧没有这个类，缺失属于正常，不计入「丢失」）
         hooks.replaceBooleanFalse(
             id = "hongguo-banner-join-revert",
             method = resolver.findMethod(
                 "com.dragon.read.ad.banner.impl.HongguoBannerServiceImpl",
                 "enableShortSeriesAdJoinRevert"
             ),
+            knownMissingOnMiss = true,
         )
         // 短剧广告总开关 + 横屏插入广告开关
         //

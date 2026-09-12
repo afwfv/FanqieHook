@@ -100,6 +100,52 @@ class ClassResolver(
         return findMethodOn(owner, methodName, parameterTypes, className)
     }
 
+    /**
+     * 目标方法找不到时，把该类上**形状相同**的候选方法名一起写进日志。
+     *
+     * 为什么值得单独做：少数目标（`ExperimentUtil#p()/#q0()`、`BrandTopViewDisplayStrategy#c()`）
+     * 是混淆名，宿主每次混淆都有机会改名。只看「method not found」的话，日志里什么线索都没有，
+     * 只能把整个目标集重新做一次 DEX 静态审计——这正是「每次更新都要重新适配」的成本来源。
+     * 把同一形状（参数个数相同）的方法名列出来之后，绝大多数改名都能直接读日志对上。
+     *
+     * 只做提示，绝不自动替换：这些混淆名在同一类上往往有多个同形状的方法（例如
+     * `ExperimentUtil` 上 `P/Q/p/q/q0` 都是 `public static ()Z`），自动挑一个等于猜，猜错就是
+     * 静默改错开关。
+     */
+    private fun describeCandidates(
+        owner: Class<*>,
+        methodName: String,
+        params: Array<out Class<*>>
+    ): String {
+        val candidates = runCatching {
+            owner.declaredMethods
+                .filter { it.parameterCount == params.size && !it.isSynthetic }
+                .map { it.name }
+                .distinct()
+                .sortedWith(
+                    // 按与目标名的公共前缀长度降序：真正常见的情况是「名字大体没改」
+                    // （`disableAdGift` → `disableAdGiftV2`），这样最像的候选排在最前面。
+                    // 大混淆类上同形状方法可能有两百多个，纯字母序会把有用线索挤出前 12 条。
+                    compareByDescending<String> { commonPrefixLength(it, methodName) }
+                        .thenBy { it }
+                )
+        }.getOrNull() ?: return ""
+        if (candidates.isEmpty()) return " (class has no ${params.size}-arg methods)"
+
+        val shown = if (candidates.size <= CANDIDATE_LIMIT) {
+            candidates
+        } else {
+            candidates.take(CANDIDATE_LIMIT) + "…(+${candidates.size - CANDIDATE_LIMIT} more)"
+        }
+        return " — same-shape candidates on ${owner.simpleName}: ${shown.joinToString(", ")}"
+    }
+
+    private fun commonPrefixLength(a: String, b: String): Int {
+        var i = 0
+        while (i < a.length && i < b.length && a[i] == b[i]) i++
+        return i
+    }
+
     private fun findMethodOn(
         owner: Class<*>,
         methodName: String,
@@ -109,7 +155,10 @@ class ClassResolver(
         return try {
             owner.getDeclaredMethod(methodName, *params).apply { isAccessible = true }
         } catch (nsm: NoSuchMethodException) {
-            log.warn("method not found: $className#$methodName(${params.joinToString { it.simpleName }})")
+            log.warn(
+                "method not found: $className#$methodName(${params.joinToString { it.simpleName }})" +
+                    describeCandidates(owner, methodName, params)
+            )
             null
         } catch (t: Throwable) {
             log.warn("method lookup failed: $className#$methodName (${t.javaClass.simpleName})")
@@ -129,9 +178,29 @@ class ClassResolver(
     ): Method? {
         val owner = findClass(className) ?: return null
         return try {
-            owner.declaredMethods.firstOrNull { m ->
+            val hit = owner.declaredMethods.firstOrNull { m ->
                 m.name == methodName && matchesReturnType(m.returnType, returnTypeName)
-            }?.apply { isAccessible = true }
+            }
+            if (hit == null) {
+                // Same diagnostic contract as [describeCandidates]: name the methods that are on
+                // this class and return the expected type, so a renamed target is readable from
+                // the log instead of requiring a DEX re-audit.
+                val sameReturn = owner.declaredMethods
+                    .filter { matchesReturnType(it.returnType, returnTypeName) && !it.isSynthetic }
+                    .map { it.name }
+                    .distinct()
+                    .sorted()
+                log.warn(
+                    "method scan found no $className#$methodName returning $returnTypeName" +
+                        if (sameReturn.isEmpty()) {
+                            " (no method returning $returnTypeName)"
+                        } else {
+                            " — methods returning $returnTypeName: " +
+                                sameReturn.take(CANDIDATE_LIMIT).joinToString(", ")
+                        }
+                )
+            }
+            hit?.apply { isAccessible = true }
         } catch (t: Throwable) {
             log.warn("method scan failed: $className#$methodName (${t.javaClass.simpleName})")
             null
@@ -325,5 +394,10 @@ class ClassResolver(
         }
         // Fallback: resolve via class loader
         return findClass(name)
+    }
+
+    private companion object {
+        /** 日志里最多列几个同形状候选方法（`ExperimentUtil` 这类混淆类可能有十几个）。 */
+        const val CANDIDATE_LIMIT = 12
     }
 }

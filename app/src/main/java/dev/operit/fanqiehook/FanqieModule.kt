@@ -19,13 +19,24 @@ import dev.operit.fanqiehook.hooks.AdHooks
  *   3. [onPackageReady]   – AppComponentFactory created; the classloader we want is here
  *   4. [onHotReloading] / [onHotReloaded] – module reloaded in place; tear down old hooks
  *
- * Safety gates applied BEFORE installing any hook (fail-closed):
+ * Safety gates applied BEFORE installing any hook:
  *   - Package name must be one of [TARGET_PACKAGES] (番茄小说 / 红果免费短剧).
  *   - Process name must equal the package name, i.e. the host's main process (do NOT touch
  *     `:push`, `:widgetProvider`, `:miniappX`, etc.).
- *   - versionCode must be one of the values registered for that package in
- *     [SUPPORTED_VERSION_CODES]. A new APK version that refactors a single class will
- *     silently break hardcoded hooks; refuse to install instead of crashing inside the host app.
+ *   - versionCode is read and reported, but is **advisory only** — see [SUPPORTED_VERSION_CODES].
+ *
+ * ## Why the version gate is advisory
+ *
+ * Every hook resolves its own target through [ClassResolver] and skips itself with a WARN when
+ * that target is gone; [HookManager] isolates each install in try/catch and keeps a list of the
+ * ones that were skipped. A host update therefore degrades hook-by-hook instead of disabling the
+ * module, and `install summary: installed=N skipped=M lost=[...]` names exactly what was lost.
+ *
+ * The previous design was fail-closed: an unknown versionCode meant *no* hook was installed at
+ * all, so the module looked broken after every host update until someone re-audited the DEX.
+ * That traded a small, visible, partial loss for a total one. Best-effort is strictly better,
+ * because the remaining failure mode (a target that moved) is reported in one log line rather
+ * than requiring a full re-adaptation.
  */
 class FanqieModule : XposedModule() {
 
@@ -70,31 +81,37 @@ class FanqieModule : XposedModule() {
             return
         }
 
-        val supportedVersionCodes = SUPPORTED_VERSION_CODES.getValue(packageName)
-        val versionCode = readVersionCode(param)
-        if (versionCode !in supportedVersionCodes) {
-            if (FAIL_OPEN && versionCode == -1L) {
-                log.warn(
-                    "versionCode unknown (hidden-API blocked on this device). FAIL_OPEN=true; " +
-                        "proceeding to install hooks. Verify hook targets manually via logcat."
-                )
-            } else {
-                log.warn(
-                    "unsupported versionCode=$versionCode for $packageName; " +
-                        "supported=${supportedVersionCodes.sorted()} " +
-                        "(this build supports only versionCodes that had a full hook-target " +
-                        "audit). Refusing to install hooks to avoid version mismatch."
-                )
-                return
-            }
-        }
-
         // Third log channel: a plain file under the host's cache dir. Needed because some LSPosed
         // forks never flush their module log, and some devices disable logging system-wide
         // (logcat returns nothing even as root) — see ModuleLog.
+        //
+        // Opened BEFORE the version check so the "unverified host version" warning and the
+        // install summary below always land in the file, on the channel that actually works.
         log.statusFile = runCatching {
             File(param.applicationInfo.dataDir, "cache/fanqiehook.log")
         }.getOrNull()
+
+        val auditedVersions = SUPPORTED_VERSION_CODES.getValue(packageName)
+        val versionCode = readVersionCode(param)
+        when {
+            versionCode in auditedVersions -> {
+                log.info("host versionCode=$versionCode is in the audited set")
+            }
+            versionCode == -1L -> {
+                log.warn(
+                    "versionCode could not be read on this device (all strategies failed); " +
+                        "installing best-effort against an unknown host version"
+                )
+            }
+            else -> {
+                log.warn(
+                    "unverified host version: versionCode=$versionCode " +
+                        "(audited: ${auditedVersions.sorted()}). Installing best-effort — each " +
+                        "hook looks up its own target and skips itself if the target moved, so " +
+                        "check the install summary below to see what this version lost."
+                )
+            }
+        }
 
         log.info(
             "target ready: package=$packageName process=$processName versionCode=$versionCode"
@@ -118,6 +135,16 @@ class FanqieModule : XposedModule() {
         // Single entry point for every ad-related hook.
         // Each `installXxx` is internally try/catch; one failure cannot stop the rest.
         AdHooks(manager, resolver, log).installAll()
+
+        // The one line that answers "did this host version break anything?".
+        // INFO when nothing that this host is expected to have went missing, WARN (naming the
+        // unexpected losses) when the host moved a target the module still expects.
+        val summary = manager.summary()
+        if (manager.unexpectedSkips.isEmpty()) {
+            log.info("install summary: $summary")
+        } else {
+            log.warn("install summary: $summary")
+        }
     }
 
     /**
@@ -204,7 +231,7 @@ class FanqieModule : XposedModule() {
         }
         if (viaActivityThread != null) return viaActivityThread
 
-        log.error("all versionCode strategies failed; gate will refuse hooks unless FAIL_OPEN is true")
+        log.error("all versionCode strategies failed; continuing best-effort with an unknown version")
         return -1L
     }
 
@@ -212,8 +239,12 @@ class FanqieModule : XposedModule() {
         const val UNKNOWN_PROCESS = "<unknown>"
 
         // ---- Module gates -------------------------------------------------------
-        // Bump an entry in SUPPORTED_VERSION_CODES only after re-running the round-1 reverse
-        // analysis on that APK.
+        // [SUPPORTED_VERSION_CODES] is an **audit record, not a gate**: it lists the versions that
+        // went through the full DEX-level hook-target audit. A versionCode outside these sets is
+        // logged as "unverified host version" and then installed best-effort anyway.
+        //
+        // Adding an entry here is a documentation act ("these targets were verified"), never a
+        // prerequisite for the module to work on a new host release.
         //
         // `com.dragon.read`  – 番茄小说
         // `com.phoenix.read` – 红果免费短剧
@@ -242,13 +273,5 @@ class FanqieModule : XposedModule() {
         )
 
         val TARGET_PACKAGES = SUPPORTED_VERSION_CODES.keys
-
-        /**
-         * If the host's `versionCode` cannot be determined (e.g. Android 14+ greylist blocks every
-         * reflective path), set this to `true` to bypass the gate and install hooks anyway. The
-         * hooks themselves will log WARN/ERROR when their targets are missing or refactored, so
-         * breakage is observable; the user accepts the risk of an unverified version match.
-         */
-        const val FAIL_OPEN = true
     }
 }

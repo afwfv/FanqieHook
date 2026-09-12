@@ -18,7 +18,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 已验证应用 | 番茄小说 `com.dragon.read` v7.3.7.32（73732）；红果免费短剧 `com.phoenix.read` v7.3.7.32（73732）。同时保留 v7.3.5.32（73532） |
+| 已验证应用 | 番茄小说 `com.dragon.read` v7.3.7.32（73732）、v7.3.7.18（73718）、v7.3.5.32（73532）；红果免费短剧 `com.phoenix.read` v7.3.7.32（73732）、v7.3.5.32（73532） |
+| 其他版本 | **可以直接用**。番茄升级后模块照常工作，个别规则失效时会在日志里列出来，不需要等新版本适配 |
 | Android | 8.0（API 26）及以上 |
 | LSPosed | Modern API 101+（102 已适配） |
 | 作用域 | `com.dragon.read`、`com.phoenix.read` |
@@ -48,14 +49,17 @@ adb shell su -c 'cat /data/data/com.dragon.read/cache/fanqiehook.log'
 # 红果：/data/data/com.phoenix.read/cache/fanqiehook.log
 ```
 
-正常情况下能看到 `target ready: ... versionCode=73732` 与 `hook installed: ...`；
+正常情况下能看到 `target ready: ... versionCode=73732`、一串 `hook installed: ...`，
+最后一行是 `install summary: hooks installed=N skipped=M`；
 实际使用时出现 `blocked ad position=...` 表示广告位被拦截。
 
 排查要点：
 
-- **只有 `target ready` 没有任何 `hook installed`** → 宿主的 versionCode 不在支持列表里，
-  模块按设计拒绝安装（避免版本不匹配导致宿主崩溃）。把日志里的 versionCode 报上来即可适配。
-- `class not found: ...HongguoBannerServiceImpl` → 正常现象，那是红果专属类，番茄侧预期跳过。
+- **`install summary` 里 `skipped` 不为 0** → 番茄这次升级动掉了列出的那几条规则，只有那几条
+  暂时失效，其余照常工作。把这一行报上来即可精确适配，不需要重新分析整个模块。
+- **`unverified host version: versionCode=...`** → 你装的番茄比模块记录的适配版本新。属于正常提示，
+  模块会继续逐条安装，实际效果看紧跟其后的 `install summary`。
+- **只有 `target ready` 没有任何 `hook installed`** → 宿主结构变化过大，把日志报上来。
 - `unlisted ad position=...` → 遇到了模块尚未分类的广告位（仅记录，不影响使用），报上来即可补进名单。
 
 ## 免责声明
