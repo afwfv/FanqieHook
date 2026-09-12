@@ -13,32 +13,22 @@
 - 拦截番茄开屏 / 全屏福利广告：挂在公共判定点 `NsUtilsDependImpl.canShowScreenAd` +
   全屏广告管理器 `IActivityScreenAdManager` 的判定方法（v0.6.2 新增，见下）
 - 拦截评论列表 / 短剧评论、故事插页、创作者广告、短视频进度条插入广告（v0.6.0 新增，见下）
-- 保留用户主动点击的激励视频 / 金币 / 看广告免广告按钮（**v0.7.0 起激励视频可「秒领」，见下**）
+- 保留用户主动点击的激励视频 / 金币 / 看广告免广告按钮
 
-### 激励秒领（v0.7.0，默认开启）
+### 激励秒领：**未实现**（v0.7.0 尝试过，v0.7.1 起关闭）
 
-激励视频一开始展示，就按「发奖成功」走 App 自己的发奖实现，并立即退出广告界面 —— 不用看满 30 秒。
+v0.7.0 曾尝试做「激励视频秒领」，**实测无效**，v0.7.1 已改为默认关闭并保留调研记录。
+结论写在这里，避免后来者重复踩：
 
-实现挂在 `RewardDisplayImpl#onAdShow`（激励视频开始展示），先放行让广告正常展示与上报，
-再反射调用 App 自己的两个回调：
-
-```
-onRewardVerifyCommon(true, false, 0)   // canReward / isMoreOne / rewardStage —— 真正的发奖落点
-onAdClose(true, null)                  // 内部 NsAdDepend.exitAdVideo("jili video") 退出广告界面
-```
-
-回调链（已在 73732 上核验）：
-
-```
-lv1.r$a#b  →  RewardDisplayImpl#onRewardVerify(Object,Object)  →  onRewardVerifyCommon(Z Z I)
-```
-
-> ⚠️ **风险提示**：本功能是**代替广告平台上报「视频已完成」**。广告主按完成量付费，该行为在广告
-> 平台侧属于作弊，番茄侧也有服务端风控，**存在账号被风控的风险**，请自行权衡。
-> 把 `AdHooks.kt` 里的 `ENABLE_INSTANT_REWARD` 改成 `false` 重新构建即可恢复「必须真正看完」。
->
-> 覆盖面：仅限走 bytedance Tomato 激励服务（`RewardDisplayImpl`）的激励位，
-> `com.bytedance.android.ad.reward.*` 等其他激励 SDK 不在范围内。
+- `RewardDisplayImpl` 是 `IRewardDisplayService` 的**桥接 + 埋点**实现，不是发奖实现。
+  它的 `onRewardVerifyCommon(Z Z I)V` 一共只有 45 条指令：
+  `iget-object → 拼日志 → 打日志 → 取单例(iv1.b#o) → iput → return`
+  —— 调它除了写一条日志什么都不会发生（实测：调用成功但金币不增加）。
+- 真实链路：App 任务层 → `lv1.s#b(Activity, uh.b, yh.e)`（拉起激励广告，`yh.e` 是回调接口）
+  → `lv1.r$a implements yh.e` → `lv1.r$a#b(uh.k)` → `RewardDisplayImpl`（埋点）。
+  **发奖落在 `yh.e` 回调的调用方（App 任务层），且金币任务由服务端权威校验。**
+- 要继续做，下一步是挂 `lv1.s#b` 并自行合成成功的 `uh.k` 驱动 `yh.e`；但 `uh.k` 只有无参构造 +
+  `toString()`、字段全为混淆继承，且服务端很可能拒收，属于投入大、成功率低。
 
 ### 开屏 / 全屏广告（v0.6.2）
 

@@ -6,6 +6,23 @@
 
 ## 未发布
 
+## 0.7.1
+v0.7.1 - 撤回 v0.7.0 的「激励秒领」：实测无效，改为默认关闭
+- 实测结论（番茄 7.3.7.32 / 73732，真机日志）：
+  hook 能装上、`onAdShow` 会被调用、`onRewardVerifyCommon(true,false,0)` 也能成功执行且不抛异常，
+  **但金币不增加** —— v0.7.0 的实现是无效的，已把 `ENABLE_INSTANT_REWARD` 改回 false
+- 原因（用原始指令转储确认，不是推断）：`RewardDisplayImpl` 只是 `IRewardDisplayService` 的
+  **桥接 + 埋点**实现。`onRewardVerifyCommon(Z Z I)V` 全方法只有 45 条指令：
+  `iget-object → 拼日志 → 打日志(bs1.b#c) → 取单例(iv1.b#o) → iput → return`
+  即它是日志/状态记录函数，调它只会写一条日志
+- 真实链路（逐层核验）：
+  App 任务层 → `lv1.s#b(Activity, uh.b, yh.e)`（拉起激励广告，`yh.e` 为回调接口）
+  → `lv1.r$a implements yh.e` → `lv1.r$a#b(uh.k)`（读字段 / iput-boolean / 转发）
+  → `RewardDisplayImpl`（埋点）。发奖落在 `yh.e` 回调的**调用方**，且金币任务由**服务端权威校验**
+- 顺带修掉一个真 bug：`onAdClose(true, null)` 传 null 会抛 `InvocationTargetException`
+  （方法内部会读第二个参数），现改为传入 hook 拿到的真实广告对象
+- 代码保留但默认关闭，仅作调研记录；README 里写明了「为什么没做出来」与后续可行方向
+
 ## 0.7.0
 v0.7.0 - 新增「激励秒领」（默认开启）
 - 效果：激励视频一开始展示即按「发奖成功」走 App 自己的发奖实现，并立即退出广告视频界面，

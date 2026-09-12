@@ -55,30 +55,35 @@ class AdHooks(
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 13. 激励秒领（默认开启）
+    // 13. 激励秒领（实验性，默认关闭；当前实现**不生效**，见下）
     //
     //   目标：把「看 30 秒激励视频才发金币」变成「激励视频一露头就发奖并退出」。
     //
-    //   番茄的激励视频走 bytedance Tomato 激励服务，App 侧实现是
-    //   `com.dragon.read.ad.tomato.reward.impl.RewardDisplayImpl`，其回调链为：
+    //   ⚠️ 现状：**这一版实现无效**，默认关闭，保留代码仅为记录调研结论。
+    //   实测（番茄 7.3.7.32 / 73732）：hook 能装上、`onAdShow` 会被调用、
+    //   `onRewardVerifyCommon(true,false,0)` 也能成功执行且不抛异常，**但金币不增加**。
     //
-    //     lv1.r$a#b(Object,Object)                       ← SDK 桥接
-    //       → RewardDisplayImpl#onRewardVerify(Object,Object)   ← 解析 inspireVerifyResult 枚举
-    //           → RewardDisplayImpl#onRewardVerifyCommon(Z Z I) ← 真正发奖（canReward / isMoreOne / rewardStage）
-    //     RewardDisplayImpl#onAdClose(Z,Object)          ← 内部 NsAdDepend.exitAdVideo("jili video") 退出广告
+    //   原因（原始指令转储确认，不是猜测）：`RewardDisplayImpl` 只是
+    //   `IRewardDisplayService` 的**桥接 + 埋点**实现，真正的发奖不在这里。
     //
-    //   做法：挂 `onAdShow(Z I Object Object)`（激励视频开始展示）——先放行让广告正常展示与上报，
-    //   然后立刻反射调用 App 自己的两个回调：
-    //     1. onRewardVerifyCommon(true, false, 0)  直接按「发奖成功」走 App 的发奖实现
-    //     2. onAdClose(true, null)                 退出广告视频界面
-    //   调用点全部包在 runCatching 里，任何一个失败都只记日志、不影响广告本身的正常流程。
+    //     `onRewardVerifyCommon(Z Z I)V` 一共只有 45 条指令：
+    //       iget-object → 拼日志字符串 → 打日志(bs1.b#c) → 取单例(iv1.b#o()) → iput → return
+    //     即它是一个日志/状态记录函数。调它除了写一条日志什么都不会发生。
     //
-    //   ⚠️ 覆盖面与风险（务必知悉）：
-    //     - 这是在**代替广告平台上报「看完了」**。广告主按完成量付费，因此该行为在广告平台侧
-    //       属于作弊；番茄侧也有服务端风控，**存在账号被风控的风险**，请自行权衡。
-    //     - 只覆盖走 Tomato 激励服务（RewardDisplayImpl）的激励位；其它激励 SDK
-    //       （com.bytedance.android.ad.reward.* 等）不在此列。
-    //     - 想要恢复「必须真的看完」，把 ENABLE_INSTANT_REWARD 改成 false 重新构建即可。
+    //   真实链路（逐层核验）：
+    //     App 任务层
+    //       → `lv1.s#b(Activity, uh.b, yh.e)`           拉起激励广告，yh.e 为回调接口
+    //            → `lv1.r$a implements yh.e`
+    //                 → `lv1.r$a#b(uh.k)`               SDK 回传结果（读字段 / iput-boolean / 转发）
+    //                      → `RewardDisplayImpl#onRewardVerify`（埋点，即上面那个空转）
+    //     发奖落在 `yh.e` 回调的**调用方**（App 任务层），且金币任务由**服务端权威校验**。
+    //
+    //   若要继续做，下一步是：挂 `lv1.s#b` 并自行合成一个成功的 `uh.k` 去驱动 `yh.e`。
+    //   但 `uh.k` 只有无参构造 + toString()，字段均为混淆继承，且服务端很可能拒收——
+    //   属于「投入大、成功率低」，在没有进一步证据前不默认开启。
+    //
+    //   风险（若将来启用）：这是代替广告平台上报「视频已完成」。广告主按完成量付费，
+    //   该行为在广告平台侧属于作弊，且番茄有服务端风控，存在账号被风控的风险。
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun installInstantRewardHooks() {
@@ -92,12 +97,16 @@ class AdHooks(
             hooker = Hooker { chain ->
                 val result = chain.proceed() // 先让广告正常展示/上报
                 val self = chain.thisObject
+                // 用真实参数而不是 null：onAdClose 内部会读第二参数，传 null 会抛
+                // InvocationTargetException（实测已复现）。
+                val adArgs = chain.args
+                val adObj = adArgs.getOrNull(3) ?: adArgs.getOrNull(2)
                 invokeRewardCallback(self, "onRewardVerifyCommon",
                     arrayOf(java.lang.Boolean.TYPE, java.lang.Boolean.TYPE, Integer.TYPE),
                     arrayOf(true, false, 0))
                 invokeRewardCallback(self, "onAdClose",
                     arrayOf(java.lang.Boolean.TYPE, java.lang.Object::class.java),
-                    arrayOf(true, null))
+                    arrayOf(true, adObj))
                 result
             },
         )
@@ -711,13 +720,17 @@ class AdHooks(
         const val LOG_UNLISTED_POSITIONS = true
 
         /**
-         * 激励秒领：激励视频一开始展示就按「发奖成功」走 App 自己的发奖回调，并立即退出广告。
+         * 激励秒领：**实验性，默认关闭**。
          *
-         * 默认 **开启**（按项目要求）。这会代替广告平台上报「视频已完成」——广告主按完成量付费，
-         * 因此该行为在广告平台侧属于作弊，且番茄有服务端风控，**存在账号风控风险**。
-         * 改成 false 重新构建即可恢复「必须真正看完」。
+         * 当前实现经实测**不生效**（hook 装上、回调能调到，但金币不增加）——原因见
+         * [installInstantRewardHooks] 的注释：可调用的那层只是埋点函数，真正的发奖在
+         * App 任务层的 `yh.e` 回调里且由服务端权威校验。保留代码是为了记录调研结论，
+         * 不是可用功能；在拿到可行方案前不要打开。
+         *
+         * 若将来启用，需知悉：这是代替广告平台上报「视频已完成」，广告主按完成量付费，
+         * 该行为在广告平台侧属于作弊，且番茄有服务端风控，存在账号被风控的风险。
          */
-        const val ENABLE_INSTANT_REWARD = true
+        const val ENABLE_INSTANT_REWARD = false
 
         // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
         // to skip install-source reporting, which may affect compliance. Review before shipping.
