@@ -18,7 +18,8 @@
 
 | 项目 | 内容 |
 |---|---|
-| 已验证应用 | 番茄小说 `com.dragon.read` v7.3.7.32（73732）；红果免费短剧 `com.phoenix.read` v7.3.7.32（73732）。同时保留 v7.3.5.32（73532） |
+| 已验证应用 | 番茄小说 `com.dragon.read` v7.3.7.32（73732）、v7.3.7.18（73718）、v7.3.5.32（73532）；红果免费短剧 `com.phoenix.read` v7.3.7.32（73732）、v7.3.5.32（73532） |
+| 其他版本 | **可以直接用**。番茄升级后模块照常工作，个别规则失效时会在日志里列出来，不需要等新版本适配 |
 | Android | 8.0（API 26）及以上 |
 | LSPosed | Modern API 101+（102 已适配） |
 | 作用域 | `com.dragon.read`、`com.phoenix.read` |
@@ -34,17 +35,32 @@
 
 ## 排查
 
-模块日志写在 LSPosed 自己的日志文件里，不在 logcat：
+有三个地方能看到模块日志，任选其一（不同 LSPosed 版本 / 机型可用的渠道不一样）：
 
 ```bash
+# 1) logcat（最方便）
+adb logcat -s FanqieHook
+
+# 2) LSPosed 自己的模块日志（标准渠道）
 adb shell su -c 'grep -a FanqieHook /data/adb/lspd/log/modules_*.log | tail -60'
+
+# 3) 宿主 cache 下的状态文件（LSPosed 不写日志、logcat 也被关闭时的兜底）
+adb shell su -c 'cat /data/data/com.dragon.read/cache/fanqiehook.log'
+# 红果：/data/data/com.phoenix.read/cache/fanqiehook.log
 ```
 
-正常情况下能看到 `target ready: ... versionCode=73732` 与 `hook installed: ...`；
+正常情况下能看到 `target ready: ... versionCode=73732`、一串 `hook installed: ...`，
+最后一行是 `install summary: hooks installed=N skipped=M`；
 实际使用时出现 `blocked ad position=...` 表示广告位被拦截。
 
-如果你在用测试版，还可能看到 `unlisted ad position=...` —— 那表示遇到了模块尚未分类的
-广告位（仅记录日志，不影响使用），报上来即可补进拦截名单。
+排查要点：
+
+- **`install summary` 里 `skipped` 不为 0** → 番茄这次升级动掉了列出的那几条规则，只有那几条
+  暂时失效，其余照常工作。把这一行报上来即可精确适配，不需要重新分析整个模块。
+- **`unverified host version: versionCode=...`** → 你装的番茄比模块记录的适配版本新。属于正常提示，
+  模块会继续逐条安装，实际效果看紧跟其后的 `install summary`。
+- **只有 `target ready` 没有任何 `hook installed`** → 宿主结构变化过大，把日志报上来。
+- `unlisted ad position=...` → 遇到了模块尚未分类的广告位（仅记录，不影响使用），报上来即可补进名单。
 
 ## 免责声明
 
