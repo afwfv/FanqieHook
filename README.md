@@ -34,17 +34,29 @@
 
 ## 排查
 
-模块日志写在 LSPosed 自己的日志文件里，不在 logcat：
+有三个地方能看到模块日志，任选其一（不同 LSPosed 版本 / 机型可用的渠道不一样）：
 
 ```bash
+# 1) logcat（最方便）
+adb logcat -s FanqieHook
+
+# 2) LSPosed 自己的模块日志（标准渠道）
 adb shell su -c 'grep -a FanqieHook /data/adb/lspd/log/modules_*.log | tail -60'
+
+# 3) 宿主 cache 下的状态文件（LSPosed 不写日志、logcat 也被关闭时的兜底）
+adb shell su -c 'cat /data/data/com.dragon.read/cache/fanqiehook.log'
+# 红果：/data/data/com.phoenix.read/cache/fanqiehook.log
 ```
 
 正常情况下能看到 `target ready: ... versionCode=73732` 与 `hook installed: ...`；
 实际使用时出现 `blocked ad position=...` 表示广告位被拦截。
 
-如果你在用测试版，还可能看到 `unlisted ad position=...` —— 那表示遇到了模块尚未分类的
-广告位（仅记录日志，不影响使用），报上来即可补进拦截名单。
+排查要点：
+
+- **只有 `target ready` 没有任何 `hook installed`** → 宿主的 versionCode 不在支持列表里，
+  模块按设计拒绝安装（避免版本不匹配导致宿主崩溃）。把日志里的 versionCode 报上来即可适配。
+- `class not found: ...HongguoBannerServiceImpl` → 正常现象，那是红果专属类，番茄侧预期跳过。
+- `unlisted ad position=...` → 遇到了模块尚未分类的广告位（仅记录，不影响使用），报上来即可补进名单。
 
 ## 免责声明
 

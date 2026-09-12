@@ -1,6 +1,7 @@
 package dev.operit.fanqiehook
 
 import android.content.pm.PackageInfo
+import java.io.File
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
 import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam
@@ -87,6 +88,13 @@ class FanqieModule : XposedModule() {
                 return
             }
         }
+
+        // Third log channel: a plain file under the host's cache dir. Needed because some LSPosed
+        // forks never flush their module log, and some devices disable logging system-wide
+        // (logcat returns nothing even as root) — see ModuleLog.
+        log.statusFile = runCatching {
+            File(param.applicationInfo.dataDir, "cache/fanqiehook.log")
+        }.getOrNull()
 
         log.info(
             "target ready: package=$packageName process=$processName versionCode=$versionCode"
@@ -223,9 +231,13 @@ class FanqieModule : XposedModule() {
         //   73732 (7.3.7.32) Fanqie – 25/26 (same Hongguo-only miss), every hook's invoke-site
         //                    count inside the target's type family identical to 73532
         //   73732 (7.3.7.32) Hongguo – 26/26
-        // Both versionCodes share one AdHooks implementation because no target moved between them.
+        //   73718 (7.3.7.18) Fanqie – 25/26 (same Hongguo-only miss); all 21 blocked position
+        //                    strings present with identical occurrence counts to 73732;
+        //                    DexKit-resolved impl identical (lf3.a). Hongguo 73718 not audited
+        //                    (no APK available), hence not registered below.
+        // Versions sharing one AdHooks implementation because no target moved between them.
         val SUPPORTED_VERSION_CODES = mapOf(
-            "com.dragon.read" to setOf(73532L, 73732L),
+            "com.dragon.read" to setOf(73532L, 73718L, 73732L),
             "com.phoenix.read" to setOf(73532L, 73732L)
         )
 
