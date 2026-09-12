@@ -105,6 +105,33 @@ class HookManager(
         })
     }
 
+    /**
+     * Install a **log-only** probe: the original method runs untouched (`chain.proceed()` is always
+     * called), and [describe] renders one line into the module log.
+     *
+     * Purpose: the reward/inspire chain is spread over obfuscated classes, and static reading alone
+     * kept producing wrong conclusions (a 45-instruction logging helper can look like real logic
+     * once filtered). A probe makes the *device* state the truth: which callbacks fire, in what
+     * order, and with what field values.
+     *
+     * [describe] receives the live [Chain] so it can dump arguments reflectively. Any exception
+     * inside it is swallowed — a probe must never affect the host.
+     */
+    fun installProbe(
+        id: String,
+        method: Method?,
+        describe: (Chain) -> String = { "args=${it.args}" }
+    ): HookHandle? {
+        if (method == null) {
+            log.warn("skip probe $id (method not found)")
+            return null
+        }
+        return installInternal(id, method, false, Hooker { chain ->
+            runCatching { log.info("probe[$id] ${describe(chain)}") }
+            chain.proceed()
+        })
+    }
+
     private fun installInternal(
         id: String,
         method: Method,

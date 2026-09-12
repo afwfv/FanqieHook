@@ -52,6 +52,7 @@ class AdHooks(
         installSplashAdHooks()
         installFullScreenAdHooks()
         installInstantRewardHooks()
+        installRewardProbes()
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -109,6 +110,86 @@ class AdHooks(
                     arrayOf(true, adObj))
                 result
             },
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 14. 激励链路探针（仅打日志；`REWARD_PROBE` 开关）
+    //
+    //   为什么需要探针：激励链路横跨混淆类，纯静态阅读已经连续给出错误结论——
+    //   `onRewardVerifyCommon` 那个 45 条指令的埋点函数，被只打印 invoke/const-string 的
+    //   过滤式反汇编看起来就像"里面有逻辑"。探针让**设备自己**说出真相：
+    //   哪些回调被调用、顺序如何、结果对象里各字段是什么。
+    //
+    //   本次要观测：
+    //     - `lv1.r$a` 实现 `yh.e`（激励回调接口），它的 b/c/d/e/g 就是 SDK 回传的各阶段回调；
+    //       `b(uh.k)` 携带「发奖结果对象」，把它的字段全部打出来 → 才能知道"成功"长什么样
+    //     - `lv1.s#b(Activity, uh.b, yh.e)`：拉起激励广告的入口（App 任务层调用）
+    //     - `ReaderSeeAdTask#a(J,String,Z)` / `#i()` / `#k(I,ShowTimeModel)`：
+    //       番茄「看广告任务」侧的反应，用来确认发奖是否真的走到任务层
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installRewardProbes() {
+        if (!REWARD_PROBE) return
+
+        // 回传结果对象：把已知字段与全部声明字段都打出来
+        hooks.installProbe(
+            id = "reward-result",
+            method = resolver.findMethod("lv1.r\$a", "b", "uh.k"),
+        ) { chain ->
+            val arg = chain.args.firstOrNull()
+            val fields = runCatching {
+                arg?.javaClass?.declaredFields?.joinToString(" ") { f ->
+                    f.isAccessible = true
+                    "${f.name}=${runCatching { f.get(arg) }.getOrNull()}"
+                } ?: "?"
+            }.getOrElse { "fielddump-error:${it.javaClass.simpleName}" }
+            "uh.k=${arg} [${fields}]"
+        }
+
+        // 其余阶段回调：只记参数，用来看真实顺序
+        for ((name, params) in listOf(
+            "c" to arrayOf("boolean"),
+            "d" to arrayOf("boolean", "int", "com.bytedance.admetaversesdk.adbase.entity.enums.AdSource"),
+            "e" to arrayOf("int", "boolean", "boolean"),
+            "g" to arrayOf("int", "String", "boolean"),
+        )) {
+            hooks.installProbe(
+                id = "reward-cb-$name",
+                method = resolver.findMethod("lv1.r\$a", name, *params),
+            )
+        }
+
+        // 拉起激励广告：SDK 入口（接口 yh.a 的实现）+ 番茄侧 facade
+        hooks.installProbe(
+            id = "reward-open",
+            method = resolver.findMethod(
+                "com.bytedance.admetaversesdk.inspire.impl.ATInspireOpenerImpl", "showInspire",
+                "android.app.Activity", "uh.b", "yh.e"
+            ),
+        )
+        hooks.installProbe(
+            id = "reward-open-facade",
+            method = resolver.findMethod("lv1.s", "b", "uh.g", "uh.h"),
+        )
+
+        // 番茄任务侧
+        hooks.installProbe(
+            id = "task-see-ad-a",
+            method = resolver.findMethod(
+                "com.dragon.read.polaris.tasks.ReaderSeeAdTask", "a", "long", "String", "boolean"
+            ),
+        )
+        hooks.installProbe(
+            id = "task-see-ad-i",
+            method = resolver.findMethod("com.dragon.read.polaris.tasks.ReaderSeeAdTask", "i"),
+        )
+        hooks.installProbe(
+            id = "task-see-ad-k",
+            method = resolver.findMethod(
+                "com.dragon.read.polaris.tasks.ReaderSeeAdTask", "k", "int",
+                "com.dragon.read.polaris.tasks.ReaderSeeAdTask\$ShowTimeModel"
+            ),
         )
     }
 
@@ -731,6 +812,11 @@ class AdHooks(
          * 该行为在广告平台侧属于作弊，且番茄有服务端风控，存在账号被风控的风险。
          */
         const val ENABLE_INSTANT_REWARD = false
+
+        /**
+         * 激励链路探针（仅打日志，见 [installRewardProbes]）。定位完成后应改回 false。
+         */
+        const val REWARD_PROBE = true
 
         // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
         // to skip install-source reporting, which may affect compliance. Review before shipping.
