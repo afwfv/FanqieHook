@@ -35,6 +35,7 @@ v0.8.1 - 适配番茄小说 7.3.7.32（versionCode 73732）、7.3.7.18（73718�
   `adb shell su -c 'cat /data/data/com.dragon.read/cache/fanqiehook.log'`
 - 安装结果会汇总成一行 `install summary: hooks installed=N skipped=M`，没装上的会列出名字，
   反馈问题时带上这一行就能定位
+- 模块名从「番茄 红果 版本7.3.7.32去广告」改为「番茄 红果 去广告」，不再把版本号写进名字
 
 ## 0.8.0
 v0.8.0 - 适配番茄小说 7.3.7.32（versionCode 73732）
