@@ -607,7 +607,17 @@ class AdHooks(
             "short_series_banner",
             // 听书信息流 / 贴片广告（AudioAdManager.checkInfoFlowAdAvailable / checkPatchAdAvailable）
             "audio_info_flow_ad",
-            "audio_patch_ad"
+            "audio_patch_ad",
+            // ── v0.8.2：红果推荐流广告 ──────────────────────────────────────────
+            // 真机实测红果启动后走到 `checkAdAvailable("recommend_video", null)`，
+            // 此前被记为 unlisted（未拦截）。定位依据：
+            //   - 与 landscape_short_series_ad / series_comment_ad / story_ad /
+            //     short_series_banner 等 8 个**已拦截**位置同在 checkAdAvailableByAbTest
+            //     的同一张 switch 表里（番茄 lf3.a#b 与红果 yb3.a#b 均有，且偏移一致）
+            //   - 调用点 e43.f 操作 OneStopAdModel（onVisible / onHolderSelected），
+            //     属于信息流被动广告位，不是用户主动触发的激励流程
+            // 两个宿主共用同一条常量，故只登记一份。
+            "recommend_video"
         )
 
         /**
@@ -629,7 +639,21 @@ class AdHooks(
             "video_tts_ad",
             "video_voice_ad",
             "video_reward_gift_ad",
-            "video_reader_end_urge_update"
+            "video_reader_end_urge_update",
+            // v0.8.2：把 checkAdAvailableByAbTest 表里剩下的金币 / 奖励位一次性登记齐全。
+            // 这些名字里带 coin / reward，语义无歧义，都是"看广告换金币/奖励"的**用户主动**
+            // 流程——正是本模块明确保留的激励视频。登记进来是为了让意图显式化，
+            // 同时避免 unlisted 日志把它们反复报成"待分类"。
+            "gold_coin_reward_box_other",
+            "gold_coin_reward_box_welfare",
+            "gold_coin_reward_dialog_ad_audio_page",
+            "gold_coin_reward_dialog_ad_general",
+            "gold_coin_reward_dialog_ad_open_treasure",
+            "video_gold_coin_reward_dialog_audio_page",
+            "video_gold_coin_reward_dialog_general",
+            "video_gold_coin_reward_dialog_open_treasure",
+            "listen_coin",
+            "video_coin_ad"
         )
 
         /**
