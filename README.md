@@ -15,20 +15,48 @@
 - 拦截评论列表 / 短剧评论、故事插页、创作者广告、短视频进度条插入广告（v0.6.0 新增，见下）
 - 保留用户主动点击的激励视频 / 金币 / 看广告免广告按钮
 
-### 激励秒领：**未实现**（v0.7.0 尝试过，v0.7.1 起关闭）
+### 激励秒领：**做不到**（已完整证伪，默认关闭）
 
-v0.7.0 曾尝试做「激励视频秒领」，**实测无效**，v0.7.1 已改为默认关闭并保留调研记录。
-结论写在这里，避免后来者重复踩：
+「看 30 秒激励视频 → 秒领金币」这个功能在番茄 7.3.7.32 上**客户端无法实现**。
+三轮真机实验的完整证据链写在这里，避免后来者重复投入：
 
-- `RewardDisplayImpl` 是 `IRewardDisplayService` 的**桥接 + 埋点**实现，不是发奖实现。
-  它的 `onRewardVerifyCommon(Z Z I)V` 一共只有 45 条指令：
-  `iget-object → 拼日志 → 打日志 → 取单例(iv1.b#o) → iput → return`
-  —— 调它除了写一条日志什么都不会发生（实测：调用成功但金币不增加）。
-- 真实链路：App 任务层 → `lv1.s#b(Activity, uh.b, yh.e)`（拉起激励广告，`yh.e` 是回调接口）
-  → `lv1.r$a implements yh.e` → `lv1.r$a#b(uh.k)` → `RewardDisplayImpl`（埋点）。
-  **发奖落在 `yh.e` 回调的调用方（App 任务层），且金币任务由服务端权威校验。**
-- 要继续做，下一步是挂 `lv1.s#b` 并自行合成成功的 `uh.k` 驱动 `yh.e`；但 `uh.k` 只有无参构造 +
-  `toString()`、字段全为混淆继承，且服务端很可能拒收，属于投入大、成功率低。
+**第 1 轮（错误结论，已证伪）**：以为 `RewardDisplayImpl#onRewardVerifyCommon(Z Z I)` 是发奖实现，
+调它 → 成功、无异常、金币不增加。原始指令转储显示该方法只有 45 条指令
+（`iget-object → 拼日志 → 打日志 → 取单例(iv1.b#o) → iput → return`）——**它只是埋点函数**；
+`RewardDisplayImpl` 整体只是 `IRewardDisplayService` 的桥接实现。
+
+**第 2 轮（采到真实样本）**：用 `installProbe` 抓完整看完一次激励视频的真实成功回调：
+
+```
+probe[reward-open]    ATInspireOpenerImpl#showInspire(Activity, ATParams, yh.e)
+                      → 第三个参数就是回调实例（真实类型 lv1.r$a）
+probe[reward-result]  uh.k = InspireVerifyResult(rewardType=2, rewardStage=0, customRewardType=1,
+                           isMoreOne=false, adSource=AT, moreOneTime=0, passThroughParams=null)
+                      混淆字段：a=2 b=0 c=1 d=false e=AT f=0 g=null
+probe[reward-cb-e]    e(1,false,false)   (yh.e#e(IZZ) = onAdClose(?, 能否得奖励, 是否再得))
+```
+
+**第 3 轮（合成派发，两种变体都失败）**：合成与真实样本**逐字段一致**的对象，反射调用
+`lv1.r$a#b(结果)`（SDK 真正回传成功时调的就是它）：
+
+- 立即派发 + 补发 `e(...)` + 关广告 → App 提示**「活动繁忙」**，广告继续播放，金币不到账
+- 最小实验：延后 3 秒、只派发 `b(结果)`、不补 `e`、不关广告 → 广告正常播放，金币仍不到账
+
+两次派发都被日志与探针确认执行成功（零异常），对象与真实样本完全相同。
+
+**根本原因**：发奖申领走 RPC `com.dragon.read.rpc.model.ReaderAdRewardRequest`，
+它的**全部字段**只有三个：
+
+```
+fieldTypeClassRef : java.lang.Class
+serialVersionUID  : long
+reqType           : ReaderAdReawrdType      ← 只有一个「奖励类型」枚举
+```
+
+**请求里没有任何来自广告 SDK 的完成凭证。** 客户端只能说"给我这类奖励"，发不发完全由服务端
+依据自己的广告完成记录决定。伪造客户端回调改变不了服务端记录，因此必然被拒（即「活动繁忙」）。
+
+除非去伪造/重放服务端的发奖响应（只会得到本地假象，且极可能触发风控），否则这条路走不通。
 
 ### 开屏 / 全屏广告（v0.6.2）
 
