@@ -6,6 +6,23 @@
 
 ## 未发布
 
+## 0.6.2
+v0.6.2 - 找到并挂上开屏/全屏广告的「根闸」（canShowScreenAd）
+- 结论修正：番茄的开屏与全屏福利广告**既不经过** NsAdImpl 的开屏位置，**也不经过**
+  OpeningScreenADActivity（那是红果的 Activity 路径），而是由**专门的全屏广告管理器**决策
+- 新增两道闸门：
+  - 依赖层公共判定点 `NsUtilsDependImpl#canShowScreenAd(Object)Z` → false
+    （接口 `com.dragon.read.NsUtilsDepend` 声明；全库 287353 个类中**仅此一个实现**，
+    是干净的公共判定点。实机日志已确认它在启动时被调用并被本模块拦下）
+  - 接口 `com.dragon.read.ad.screen.IActivityScreenAdManager`（全屏福利广告管理器）实现类上的
+    **零参 boolean 方法** → false。73732 上实现类唯一（`ua3.f`），两个判定方法为
+    `a()Z` 与 `onScreenAdDialogShow()Z`
+- 为什么按「DexKit 接口反查 + 零参 boolean 方法」而不是写死名字：类名与方法名都是混淆的，
+  且 73732 相对更早版本已改过名（更早版本的判定方法叫 `b`/`c`），写死必然在某次更新后失效；
+  按接口 + 返回类型挂则与混淆名无关
+- 证据来源：同类模块目标表交叉核对 + 本机 73732 DEX 核验（接口实现类唯一、
+  boolean 方法签名一一对应），并已实机确认闸门在启动路径上被调用
+
 ## 0.6.1
 v0.6.1 - 修正番茄开屏广告的链路假设，并补上品牌开屏闸门
 - 问题：v0.1.0~v0.6.0 的「开屏阻断」是按红果的 Activity 路径做的

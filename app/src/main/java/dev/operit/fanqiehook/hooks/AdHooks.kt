@@ -50,6 +50,73 @@ class AdHooks(
         installExperimentalSplashHook()
         installShortSeriesAdHooks()
         installSplashAdHooks()
+        installFullScreenAdHooks()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 12. 全屏广告 / 开屏的「根闸」
+    //
+    //   实测结论：番茄的开屏与全屏福利广告**不经过** NsAdImpl 的开屏位置与
+    //   OpeningScreenADActivity（那是红果的 Activity 路径），而是由一个专门的管理器决策：
+    //
+    //     - 依赖层闸门：`NsUtilsDependImpl.canShowScreenAd(Object)Z`
+    //       由接口 `com.dragon.read.NsUtilsDepend` 声明；全库（287353 个类）只有这一个实现，
+    //       即它是一个干净的公共判定点。
+    //     - 管理器：接口 `com.dragon.read.ad.screen.IActivityScreenAdManager`
+    //       （“全屏福利广告管理器”），其实现类上的零参 boolean 方法即展示判定。
+    //       73732 上实现类唯一（`ua3.f`），两个判定方法是 `a()Z` 与 `onScreenAdDialogShow()Z`。
+    //
+    //   为什么按「接口反查 + 零参 boolean」而不是写死名字：类名和方法名都是混淆的，且
+    //   73732 相对更早版本已经改过名（旧版实现类是别的混淆名、判定方法叫 b/c），写死必然失效。
+    //
+    //   证据来源：同类模块目标表交叉核对 + 本机 73732 DEX 核验（接口实现类唯一、
+    //   boolean 方法签名一一对应、两次调用点计数一致）。
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installFullScreenAdHooks() {
+        // 依赖层闸门：命中时打一条日志，便于确认它确实是开屏路径上的公共判定点。
+        hooks.install(
+            id = "fullscreen-ad-depend-gate",
+            method = resolver.findMethod(
+                "com.dragon.read.component.NsUtilsDependImpl",
+                "canShowScreenAd",
+                "Object"
+            ),
+            deoptimize = true,
+            hooker = Hooker {
+                log.info("blocked fullscreen-ad gate: NsUtilsDependImpl.canShowScreenAd")
+                false
+            },
+        )
+
+        val iface = "com.dragon.read.ad.screen.IActivityScreenAdManager"
+        val impls = resolver.findClassImplementingInterface(iface, "onScreenAdDialogShow")
+        if (impls.isEmpty()) {
+            log.warn("fullscreen-ad: DexKit found no $iface impl; only the depend gate is hooked")
+            return
+        }
+        for (cls in impls) {
+            val gates = runCatching {
+                cls.declaredMethods.filter {
+                    it.parameterCount == 0 &&
+                        it.returnType == java.lang.Boolean.TYPE &&
+                        !java.lang.reflect.Modifier.isStatic(it.modifiers)
+                }
+            }.getOrElse { t ->
+                log.warn("fullscreen-ad: cannot enumerate ${cls.name} methods (${t.javaClass.simpleName})")
+                emptyList()
+            }
+            if (gates.isEmpty()) {
+                log.warn("fullscreen-ad: no zero-arg boolean gate found on ${cls.name}")
+            }
+            for (m in gates) {
+                hooks.replaceBooleanFalse(
+                    id = "fullscreen-ad:${cls.name}#${m.name}",
+                    method = m,
+                    deoptimize = true,
+                )
+            }
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

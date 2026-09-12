@@ -10,8 +10,23 @@
 - 拦截短剧暂停广告
 - 拦截红果短剧 banner、贴片、横屏插入广告
 - 拦截红果热启动开屏广告（Activity 级阻断）
+- 拦截番茄开屏 / 全屏福利广告：挂在公共判定点 `NsUtilsDependImpl.canShowScreenAd` +
+  全屏广告管理器 `IActivityScreenAdManager` 的判定方法（v0.6.2 新增，见下）
 - 拦截评论列表 / 短剧评论、故事插页、创作者广告、短视频进度条插入广告（v0.6.0 新增，见下）
 - 保留用户主动点击的激励视频 / 金币 / 看广告免广告按钮
+
+### 开屏 / 全屏广告（v0.6.2）
+
+番茄的开屏广告**不走** `NsAdImpl` 的开屏位置，**也不走** `OpeningScreenADActivity`
+（后者是红果的 Activity 路径）—— 这是 v0.6.1 之前一直拦不住它的原因。
+实际的决策点是：
+
+| 闸门 | 说明 |
+|---|---|
+| `NsUtilsDependImpl.canShowScreenAd(Object)Z` | 依赖层公共判定点，接口 `NsUtilsDepend` 声明；全库 287353 个类中仅此一个实现 |
+| `IActivityScreenAdManager` 实现类上的零参 boolean 方法 | 全屏福利广告管理器；73732 上实现类唯一（`ua3.f`），判定方法为 `a()` 与 `onScreenAdDialogShow()` |
+
+两者都按「DexKit 接口反查 + 返回类型」挂载，不写死混淆名，因此不受改名影响。
 
 ### 广告位覆盖（v0.6.0）
 
