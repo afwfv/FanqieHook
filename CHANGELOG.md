@@ -4,6 +4,20 @@
 > 找不到对应版本段时，回退使用「未发布」段。
 > 每次在 debug 分支改动代码后，把中文说明补到当前版本段（发版前记得递增 versionCode / version）。
 
+## 分支与发布纪律（务必遵守）
+
+CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xposed-modules-repo.yml`
+里 `on.push.branches: [main]`），推 debug 不会构建、不会发版。
+
+1. **日常改动一律提交到 `debug` 分支**并推 `origin/debug` —— 不碰 main
+2. **在真机上验证通过**之后，才把 debug 合入 main
+3. 合 main 前：递增 `versionCode` / `version`，并把该版本的说明写进本文件对应段落
+4. 合 main → CI 自动构建并发布到自家仓库与模块仓库（tag：`[versionCode]-[versionName]`）
+
+反面教训：v0.6.1（未验证）与 v0.7.0（「激励秒领」实测无效）都是没验证就直接推 main
+发出去的，用户直接收到了带无效功能的版本。宁可在 debug 上多待几天，也不要发一个
+自己没验过的版本。
+
 ## 未发布
 
 ## 0.7.1
