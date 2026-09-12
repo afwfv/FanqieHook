@@ -6,6 +6,27 @@
 
 ## 未发布
 
+## 0.7.0
+v0.7.0 - 新增「激励秒领」（默认开启）
+- 效果：激励视频一开始展示即按「发奖成功」走 App 自己的发奖实现，并立即退出广告视频界面，
+  不再需要看满 30 秒
+- 实现：挂 `RewardDisplayImpl#onAdShow(Z I Object Object)`（激励视频开始展示）——
+  先放行让广告正常展示与上报，再反射调用 App 自己的两个回调：
+  1. `onRewardVerifyCommon(true, false, 0)`（canReward / isMoreOne / rewardStage）→ 走 App 的发奖实现
+  2. `onAdClose(true, null)` → 内部 `NsAdDepend.exitAdVideo("jili video")` 退出广告界面
+  两处调用都包在 runCatching 中，失败只记日志，不影响广告自身流程
+- 回调链（已在 73732 上核验）：
+  `lv1.r$a#b` → `RewardDisplayImpl#onRewardVerify(Object,Object)` →
+  `onRewardVerifyCommon(Z Z I)` ← 真正的发奖落点
+- 覆盖面：仅限走 bytedance Tomato 激励服务（`RewardDisplayImpl`）的激励位；
+  `com.bytedance.android.ad.reward.*` 等其他激励 SDK 不在范围内
+- ⚠️ 风险：本功能是**代替广告平台上报「视频已完成」**。广告主按完成量付费，该行为在广告平台侧
+  属于作弊，且番茄有服务端风控，**存在账号被风控的风险**。改为 false 重新构建即可恢复
+  「必须真正看完」
+- 顺带记录：同类模块用 `closeFragment(boolean)` 实现秒领，但在 73732 上
+  `ExcitingVideoFragment.closeFragment` 已是**无参**且只做「通知监听器 + release + finish」，
+  **本身不发奖**，因此那套写法在新版本上是失效的
+
 ## 0.6.3
 v0.6.3 - 体积优化：APK 1.84 MB → 0.47 MB（-74%）
 - 去掉无用 ABI：宿主（番茄 73532 / 73732、红果同基线）实测**只打包 arm64-v8a**，

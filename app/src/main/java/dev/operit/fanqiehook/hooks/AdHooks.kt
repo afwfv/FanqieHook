@@ -51,6 +51,77 @@ class AdHooks(
         installShortSeriesAdHooks()
         installSplashAdHooks()
         installFullScreenAdHooks()
+        installInstantRewardHooks()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 13. 激励秒领（默认开启）
+    //
+    //   目标：把「看 30 秒激励视频才发金币」变成「激励视频一露头就发奖并退出」。
+    //
+    //   番茄的激励视频走 bytedance Tomato 激励服务，App 侧实现是
+    //   `com.dragon.read.ad.tomato.reward.impl.RewardDisplayImpl`，其回调链为：
+    //
+    //     lv1.r$a#b(Object,Object)                       ← SDK 桥接
+    //       → RewardDisplayImpl#onRewardVerify(Object,Object)   ← 解析 inspireVerifyResult 枚举
+    //           → RewardDisplayImpl#onRewardVerifyCommon(Z Z I) ← 真正发奖（canReward / isMoreOne / rewardStage）
+    //     RewardDisplayImpl#onAdClose(Z,Object)          ← 内部 NsAdDepend.exitAdVideo("jili video") 退出广告
+    //
+    //   做法：挂 `onAdShow(Z I Object Object)`（激励视频开始展示）——先放行让广告正常展示与上报，
+    //   然后立刻反射调用 App 自己的两个回调：
+    //     1. onRewardVerifyCommon(true, false, 0)  直接按「发奖成功」走 App 的发奖实现
+    //     2. onAdClose(true, null)                 退出广告视频界面
+    //   调用点全部包在 runCatching 里，任何一个失败都只记日志、不影响广告本身的正常流程。
+    //
+    //   ⚠️ 覆盖面与风险（务必知悉）：
+    //     - 这是在**代替广告平台上报「看完了」**。广告主按完成量付费，因此该行为在广告平台侧
+    //       属于作弊；番茄侧也有服务端风控，**存在账号被风控的风险**，请自行权衡。
+    //     - 只覆盖走 Tomato 激励服务（RewardDisplayImpl）的激励位；其它激励 SDK
+    //       （com.bytedance.android.ad.reward.* 等）不在此列。
+    //     - 想要恢复「必须真的看完」，把 ENABLE_INSTANT_REWARD 改成 false 重新构建即可。
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installInstantRewardHooks() {
+        if (!ENABLE_INSTANT_REWARD) return
+
+        val impl = "com.dragon.read.ad.tomato.reward.impl.RewardDisplayImpl"
+        hooks.install(
+            id = "instant-reward",
+            method = resolver.findMethod(impl, "onAdShow", "boolean", "int", "Object", "Object"),
+            deoptimize = true,
+            hooker = Hooker { chain ->
+                val result = chain.proceed() // 先让广告正常展示/上报
+                val self = chain.thisObject
+                invokeRewardCallback(self, "onRewardVerifyCommon",
+                    arrayOf(java.lang.Boolean.TYPE, java.lang.Boolean.TYPE, Integer.TYPE),
+                    arrayOf(true, false, 0))
+                invokeRewardCallback(self, "onAdClose",
+                    arrayOf(java.lang.Boolean.TYPE, java.lang.Object::class.java),
+                    arrayOf(true, null))
+                result
+            },
+        )
+    }
+
+    /**
+     * 反射调用一个激励回调；失败只记日志，绝不抛出到宿主进程。
+     * 用反射而不是直接引用，是因为这些方法都在混淆类上、且优先按 `getDeclaredMethod` 命中，
+     * 签名对不上时只降级为「这条不生效」，不会影响其它 hook。
+     */
+    private fun invokeRewardCallback(
+        target: Any,
+        name: String,
+        paramTypes: Array<Class<*>>,
+        args: Array<Any?>
+    ) {
+        try {
+            val m = target.javaClass.getDeclaredMethod(name, *paramTypes)
+            m.isAccessible = true
+            m.invoke(target, *args)
+            log.info("instant-reward: invoked $name(${args.joinToString { it?.toString() ?: "null" }})")
+        } catch (t: Throwable) {
+            log.warn("instant-reward: $name failed (${t.javaClass.simpleName}: ${t.message})")
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -638,6 +709,15 @@ class AdHooks(
          * gap. Disable if the extra INFO lines are unwanted.
          */
         const val LOG_UNLISTED_POSITIONS = true
+
+        /**
+         * 激励秒领：激励视频一开始展示就按「发奖成功」走 App 自己的发奖回调，并立即退出广告。
+         *
+         * 默认 **开启**（按项目要求）。这会代替广告平台上报「视频已完成」——广告主按完成量付费，
+         * 因此该行为在广告平台侧属于作弊，且番茄有服务端风控，**存在账号风控风险**。
+         * 改成 false 重新构建即可恢复「必须真正看完」。
+         */
+        const val ENABLE_INSTANT_REWARD = true
 
         // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
         // to skip install-source reporting, which may affect compliance. Review before shipping.
