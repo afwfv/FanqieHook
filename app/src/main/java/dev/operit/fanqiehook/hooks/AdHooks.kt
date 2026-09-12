@@ -3,7 +3,6 @@ package dev.operit.fanqiehook.hooks
 import dev.operit.fanqiehook.ClassResolver
 import dev.operit.fanqiehook.HookManager
 import dev.operit.fanqiehook.ModuleLog
-import io.github.libxposed.api.XposedInterface.Hooker
 
 /**
  * All ad-related hooks for `com.dragon.read` versionCodes 73532 (v7.3.5.32) and 73732 (v7.3.7.32).
@@ -38,10 +37,6 @@ class AdHooks(
      * Convenience bundle: install every category. Each `installXxx` is internally try/caught;
      * one failure never short-circuits another.
      */
-    /** 激励回调实例（yh.e 的实现，实测为 lv1.r），由 showInspire 钩子捕获。 */
-    @Volatile
-    private var inspireCallback: Any? = null
-
     fun installAll() {
         installReaderHooks()
         installTopViewHooks()
@@ -55,292 +50,8 @@ class AdHooks(
         installShortSeriesAdHooks()
         installSplashAdHooks()
         installFullScreenAdHooks()
-        installInstantRewardHooks()
-        installRewardProbes()
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 13. 激励秒领：**经完整实验证伪，客户端做不到**（代码保留作调研记录，默认关闭）
-    //
-    //   目标：把「看 30 秒激励视频才发金币」变成「激励视频一露头就发奖并退出」。
-    //
-    //   结论：**在番茄 7.3.7.32（73732）上，客户端伪造发奖回调拿不到金币** —— 发奖由
-    //   服务端权威校验。下面是完整的实验与证据链（三轮真机实验，均有日志）：
-    //
-    //   第 1 轮（错误结论）：以为 `RewardDisplayImpl#onRewardVerifyCommon(Z Z I)` 是发奖实现，
-    //     调它 → 调用成功、无异常、金币不增加。
-    //     原始指令转储证伪：该方法只有 45 条指令
-    //       iget-object → 拼日志 → 打日志(bs1.b#c) → 取单例(iv1.b#o()) → iput → return
-    //     即它是**埋点函数**。`RewardDisplayImpl` 整体只是 `IRewardDisplayService` 的桥接实现。
-    //
-    //   第 2 轮（探针采集真实样本）：用 installProbe 抓完整看完一次激励视频的真实成功回调：
-    //       probe[reward-open]      ATInspireOpenerImpl#showInspire(Activity, ATParams, yh.e)
-    //                               → 第三个参数就是回调实例（真实类型 lv1.r$a）
-    //       probe[reward-result]    uh.k = InspireVerifyResult(
-    //                                 rewardType=2, rewardStage=0, customRewardType=1,
-    //                                 isMoreOne=false, adSource=AT, moreOneTime=0, passThroughParams=null)
-    //                               混淆字段 a=2 b=0 c=1 d=false e=AT f=0 g=null
-    //       probe[reward-cb-e]      e(1,false,false)（`yh.e#e(IZZ)` = onAdClose(?, 能否得奖励, 是否再得)）
-    //
-    //   第 3 轮（合成派发，两轮）：把上述**与真实样本逐字段一致**的结果对象合成出来，
-    //     反射调用 `lv1.r$a#b(结果)`（SDK 真正回传成功时调的就是它）：
-    //       - 立即派发 + 补发 e(...) + onAdClose → App 提示「活动繁忙」，广告继续播放，金币不到账
-    //       - 最小实验：延后 3 秒、只派发 b(结果)、不补 e、不关广告 → 广告正常播放，金币仍不到账
-    //     两次派发都被日志与探针确认执行成功（零异常），对象与真实样本完全一致。
-    //
-    //   根本原因：发奖申领走 RPC `com.dragon.read.rpc.model.ReaderAdRewardRequest`，其**全部字段**只有
-    //       fieldTypeClassRef : Class
-        //      serialVersionUID  : long
-    //       reqType           : ReaderAdReawrdType（奖励类型枚举）
-    //     —— **请求里没有任何来自广告 SDK 的完成凭证**。即客户端只能说"给我这类奖励"，
-    //     是否发放完全由服务端根据自己的广告完成记录决定。客户端伪造回调无法改变服务端记录，
-    //     因此必然被拒（表现为「活动繁忙」）。
-    //
-    //   怎样才有用（都不建议做）：伪造/重放服务端的发奖响应，或修改服务端可见的完成记录。
-    //   前者只会得到本地假象、且极可能触发风控；后者已不属于客户端改包范畴。
-    //
-    //   风险（若将来有人开启）：这是代替广告平台上报「视频已完成」。广告主按完成量付费，
-    //   该行为在广告平台侧属于作弊，且番茄有服务端风控，存在账号被风控的风险。
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private fun installInstantRewardHooks() {
-        if (!ENABLE_INSTANT_REWARD) return
-
-        // ── 第一步：捕获激励回调实例 ──────────────────────────────────────────
-        // 实测（探针 reward-open）：`ATInspireOpenerImpl#showInspire(Activity, ATParams, yh.e)`
-        // 的第三个参数就是回调实例（真实类型 `lv1.r$a`）。它就是 SDK 回传发奖结果的那一端。
-        hooks.install(
-            id = "instant-reward-capture",
-            method = resolver.findMethod(
-                "com.bytedance.admetaversesdk.inspire.impl.ATInspireOpenerImpl", "showInspire",
-                "android.app.Activity", "uh.b", "yh.e"
-            ),
-            deoptimize = true,
-            hooker = Hooker { chain ->
-                inspireCallback = chain.args.getOrNull(2)
-                log.info("instant-reward: captured inspire callback = ${inspireCallback?.javaClass?.name}")
-                chain.proceed() // 广告照常展示与上报，只是不等它播完
-            },
-        )
-
-        // ── 第二步：广告一展示出来，就直接把「发奖成功」结果派发下去 ──────────
-        hooks.install(
-            id = "instant-reward",
-            method = resolver.findMethod(IMPL, "onAdShow", "boolean", "int", "Object", "Object"),
-            deoptimize = true,
-            hooker = Hooker { chain ->
-                val result = chain.proceed()
-                val cb = inspireCallback
-                if (cb == null) {
-                    log.warn("instant-reward: no inspire callback captured yet; skipped")
-                } else if (INSTANT_REWARD_DELAY_MS > 0) {
-                    // 延后派发：上一次实验是「广告一展示就立刻申领」，实测被业务层拒绝
-                    // （提示"活动繁忙"）。发奖申领请求里没有广告凭证，服务端靠自己的完成记录
-                    // 判断，因此立刻申领必然过早。这里改为延后，隔离"时序"这一个变量。
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        runCatching { dispatchSyntheticReward(cb, null, emptyList()) }
-                            .onFailure { log.warn("instant-reward: delayed dispatch failed (${it.javaClass.simpleName})") }
-                    }, INSTANT_REWARD_DELAY_MS)
-                    log.info("instant-reward: dispatch scheduled in ${INSTANT_REWARD_DELAY_MS}ms")
-                } else {
-                    runCatching { dispatchSyntheticReward(cb, null, emptyList()) }
-                }
-                result
-            },
-        )
-    }
-
-    /**
-     * 合成一个「发奖成功」结果并沿 App 自己的回调链派发下去。
-     *
-     * 结果对象的类型**从回调的 `b(...)` 方法签名里取**，不写死 `uh.k`——混淆类名随时会变，
-     * 而"回调上那个单参数方法"这个关系是稳定的。
-     *
-     * 字段取值来自探针 `reward-result` 在真机上采到的成功样本（番茄 7.3.7.32，完整看完一次
-     * 激励视频时 SDK 回传的对象）：
-     *
-     *     InspireVerifyResult(rewardType=2, rewardStage=0, customRewardType=1,
-     *                         isMoreOne=false, adSource=AT, moreOneTime=0, passThroughParams=null)
-     *
-     * 混淆字段名 `a..g` 与该顺序一一对应（探针 dump 出的字段顺序与 toString 顺序一致）。
-     */
-    private fun dispatchSyntheticReward(cb: Any, display: Any?, adShowArgs: List<Any?>) {
-        val dispatch = runCatching {
-            cb.javaClass.methods.firstOrNull { it.name == "b" && it.parameterCount == 1 }
-        }.getOrNull()
-        if (dispatch == null) {
-            log.warn("instant-reward: no single-arg 'b(...)' on ${cb.javaClass.name}")
-            return
-        }
-        val resType = dispatch.parameterTypes[0]
-        val res = runCatching { resType.getDeclaredConstructor().newInstance() }.getOrElse { t ->
-            log.warn("instant-reward: cannot instantiate ${resType.name} (${t.javaClass.simpleName})")
-            return
-        }
-        setField(res, "a", 2)
-        setField(res, "b", 0)
-        setField(res, "c", 1)
-        setField(res, "d", false)
-        setEnumField(res, "e", "AT")
-        setField(res, "f", 0)
-        setField(res, "g", null)
-        log.info("instant-reward: synthesized reward result = $res")
-
-        runCatching {
-            dispatch.isAccessible = true
-            dispatch.invoke(cb, res)
-            log.info("instant-reward: dispatched ${dispatch.name}($res)")
-        }.onFailure { log.warn("instant-reward: dispatch failed (${it.javaClass.simpleName}: ${it.message})") }
-
-        // 最小实验：只派发 `b(结果)`，不补 `e(...)`、不关广告 —— 用来隔离变量。
-        // 若这次金币到账，说明之前失败是「补发的 e(能否得奖励=false) 或过早关闭广告」造成的；
-        // 若仍不到账，则基本可以断定发奖由服务端权威校验（申领请求里没有任何广告凭证）。
-        if (INSTANT_REWARD_MINIMAL) {
-            log.info("instant-reward: minimal mode — skipping e(...) / onAdClose")
-            return
-        }
-
-        // 真实流程里 `b(结果)` 之后紧跟一个 `e(I Z Z)` 回调（实测参数 1,false,false），一并补上。
-        runCatching {
-            val e = cb.javaClass.getDeclaredMethod(
-                "e", Integer.TYPE, java.lang.Boolean.TYPE, java.lang.Boolean.TYPE
-            )
-            e.isAccessible = true
-            e.invoke(cb, 1, false, false)
-            log.info("instant-reward: dispatched e(1,false,false)")
-        }.onFailure { log.warn("instant-reward: e(...) failed (${it.javaClass.simpleName})") }
-
-        // 退出广告界面（内部 NsAdDepend.exitAdVideo("jili video")）。
-        // 第二参数必须用真实广告对象，传 null 会抛 InvocationTargetException（实测已复现）。
-        val adObj = adShowArgs.getOrNull(3) ?: adShowArgs.getOrNull(2)
-        if (display == null) return
-        invokeRewardCallback(
-            display, "onAdClose",
-            arrayOf(java.lang.Boolean.TYPE, java.lang.Object::class.java),
-            arrayOf(true, adObj)
-        )
-    }
-
-    /** 反射写字段；失败只记日志。 */
-    private fun setField(target: Any, name: String, value: Any?) {
-        runCatching {
-            val f = target.javaClass.getDeclaredField(name)
-            f.isAccessible = true
-            f.set(target, value)
-        }.onFailure { log.warn("instant-reward: set $name failed (${it.javaClass.simpleName})") }
-    }
-
-    /** 反射写枚举字段：优先取指定常量名，取不到就退化为第一个常量。 */
-    private fun setEnumField(target: Any, name: String, constName: String) {
-        runCatching {
-            val f = target.javaClass.getDeclaredField(name)
-            f.isAccessible = true
-            val constants = f.type.enumConstants
-            val v = constants?.firstOrNull { (it as? Enum<*>)?.name == constName } ?: constants?.firstOrNull()
-            f.set(target, v)
-        }.onFailure { log.warn("instant-reward: set enum $name failed (${it.javaClass.simpleName})") }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 14. 激励链路探针（仅打日志；`REWARD_PROBE` 开关）
-    //
-    //   为什么需要探针：激励链路横跨混淆类，纯静态阅读已经连续给出错误结论——
-    //   `onRewardVerifyCommon` 那个 45 条指令的埋点函数，被只打印 invoke/const-string 的
-    //   过滤式反汇编看起来就像"里面有逻辑"。探针让**设备自己**说出真相：
-    //   哪些回调被调用、顺序如何、结果对象里各字段是什么。
-    //
-    //   本次要观测：
-    //     - `lv1.r$a` 实现 `yh.e`（激励回调接口），它的 b/c/d/e/g 就是 SDK 回传的各阶段回调；
-    //       `b(uh.k)` 携带「发奖结果对象」，把它的字段全部打出来 → 才能知道"成功"长什么样
-    //     - `lv1.s#b(Activity, uh.b, yh.e)`：拉起激励广告的入口（App 任务层调用）
-    //     - `ReaderSeeAdTask#a(J,String,Z)` / `#i()` / `#k(I,ShowTimeModel)`：
-    //       番茄「看广告任务」侧的反应，用来确认发奖是否真的走到任务层
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private fun installRewardProbes() {
-        if (!REWARD_PROBE) return
-
-        // 回传结果对象：把已知字段与全部声明字段都打出来
-        hooks.installProbe(
-            id = "reward-result",
-            method = resolver.findMethod("lv1.r\$a", "b", "uh.k"),
-        ) { chain ->
-            val arg = chain.args.firstOrNull()
-            val fields = runCatching {
-                arg?.javaClass?.declaredFields?.joinToString(" ") { f ->
-                    f.isAccessible = true
-                    "${f.name}=${runCatching { f.get(arg) }.getOrNull()}"
-                } ?: "?"
-            }.getOrElse { "fielddump-error:${it.javaClass.simpleName}" }
-            "uh.k=${arg} [${fields}]"
-        }
-
-        // 其余阶段回调：只记参数，用来看真实顺序
-        for ((name, params) in listOf(
-            "c" to arrayOf("boolean"),
-            "d" to arrayOf("boolean", "int", "com.bytedance.admetaversesdk.adbase.entity.enums.AdSource"),
-            "e" to arrayOf("int", "boolean", "boolean"),
-            "g" to arrayOf("int", "String", "boolean"),
-        )) {
-            hooks.installProbe(
-                id = "reward-cb-$name",
-                method = resolver.findMethod("lv1.r\$a", name, *params),
-            )
-        }
-
-        // 拉起激励广告：SDK 入口（接口 yh.a 的实现）+ 番茄侧 facade
-        hooks.installProbe(
-            id = "reward-open",
-            method = resolver.findMethod(
-                "com.bytedance.admetaversesdk.inspire.impl.ATInspireOpenerImpl", "showInspire",
-                "android.app.Activity", "uh.b", "yh.e"
-            ),
-        )
-        hooks.installProbe(
-            id = "reward-open-facade",
-            method = resolver.findMethod("lv1.s", "b", "uh.g", "uh.h"),
-        )
-
-        // 番茄任务侧
-        hooks.installProbe(
-            id = "task-see-ad-a",
-            method = resolver.findMethod(
-                "com.dragon.read.polaris.tasks.ReaderSeeAdTask", "a", "long", "String", "boolean"
-            ),
-        )
-        hooks.installProbe(
-            id = "task-see-ad-i",
-            method = resolver.findMethod("com.dragon.read.polaris.tasks.ReaderSeeAdTask", "i"),
-        )
-        hooks.installProbe(
-            id = "task-see-ad-k",
-            method = resolver.findMethod(
-                "com.dragon.read.polaris.tasks.ReaderSeeAdTask", "k", "int",
-                "com.dragon.read.polaris.tasks.ReaderSeeAdTask\$ShowTimeModel"
-            ),
-        )
-    }
-
-    /**
-     * 反射调用一个激励回调；失败只记日志，绝不抛出到宿主进程。
-     * 用反射而不是直接引用，是因为这些方法都在混淆类上、且优先按 `getDeclaredMethod` 命中，
-     * 签名对不上时只降级为「这条不生效」，不会影响其它 hook。
-     */
-    private fun invokeRewardCallback(
-        target: Any,
-        name: String,
-        paramTypes: Array<Class<*>>,
-        args: Array<Any?>
-    ) {
-        try {
-            val m = target.javaClass.getDeclaredMethod(name, *paramTypes)
-            m.isAccessible = true
-            m.invoke(target, *args)
-            log.info("instant-reward: invoked $name(${args.joinToString { it?.toString() ?: "null" }})")
-        } catch (t: Throwable) {
-            log.warn("instant-reward: $name failed (${t.javaClass.simpleName}: ${t.message})")
-        }
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // 12. 全屏广告 / 开屏的「根闸」
@@ -372,7 +83,7 @@ class AdHooks(
                 "Object"
             ),
             deoptimize = true,
-            hooker = Hooker {
+            body = {
                 log.info("blocked fullscreen-ad gate: NsUtilsDependImpl.canShowScreenAd")
                 false
             },
@@ -796,23 +507,23 @@ class AdHooks(
                 "com.dragon.read.report.PageRecorder"
             ),
             deoptimize = true,
-            hooker = Hooker { /* 不调用 proceed，直接阻断 */ },
+            body = { /* 不调用 proceed，直接阻断 */ },
         )
         // 双保险：即使 Activity 被其他途径拉起，广告 View 也不会挂载
         hooks.install(
             id = "splash-ad-brand-view",
             method = resolver.findMethod(splashActivity, "showBrandAdView", "android.view.View"),
-            hooker = Hooker { /* no-op */ },
+            body = { /* no-op */ },
         )
         hooks.install(
             id = "splash-ad-imc-view",
             method = resolver.findMethod(splashActivity, "showImcSplashView", "android.view.View"),
-            hooker = Hooker { /* no-op */ },
+            body = { /* no-op */ },
         )
         hooks.install(
             id = "splash-ad-natural-view",
             method = resolver.findMethod(splashActivity, "showNaturalAdView", "android.view.View"),
-            hooker = Hooker { /* no-op */ },
+            body = { /* no-op */ },
         )
 
         // ── 番茄侧的品牌开屏（补充闸门）──────────────────────────────────────
@@ -927,33 +638,6 @@ class AdHooks(
          * gap. Disable if the extra INFO lines are unwanted.
          */
         const val LOG_UNLISTED_POSITIONS = true
-
-        /**
-         * 激励秒领：**实验性，默认关闭**。
-         *
-         * 当前实现经实测**不生效**（hook 装上、回调能调到，但金币不增加）——原因见
-         * [installInstantRewardHooks] 的注释：可调用的那层只是埋点函数，真正的发奖在
-         * App 任务层的 `yh.e` 回调里且由服务端权威校验。保留代码是为了记录调研结论，
-         * 不是可用功能；在拿到可行方案前不要打开。
-         *
-         * 若将来启用，需知悉：这是代替广告平台上报「视频已完成」，广告主按完成量付费，
-         * 该行为在广告平台侧属于作弊，且番茄有服务端风控，存在账号被风控的风险。
-         */
-        const val ENABLE_INSTANT_REWARD = false
-
-        /** 激励显示服务实现（混淆名，仅此处集中引用）。 */
-        const val IMPL = "com.dragon.read.ad.tomato.reward.impl.RewardDisplayImpl"
-
-        /** 派发合成的发奖结果前延后多少毫秒（0 = 立刻）。用于隔离「时序」变量。 */
-        const val INSTANT_REWARD_DELAY_MS = 3000L
-
-        /** 最小实验：只派发 b(结果)，不补 e(...)、不关广告。 */
-        const val INSTANT_REWARD_MINIMAL = true
-
-        /**
-         * 激励链路探针（仅打日志，见 [installRewardProbes]）。定位完成后应改回 false。
-         */
-        const val REWARD_PROBE = false
 
         // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
         // to skip install-source reporting, which may affect compliance. Review before shipping.
