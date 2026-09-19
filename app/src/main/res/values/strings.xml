@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">FanqieHook</string>
-    <string name="module_description">番茄小说 7.3.5.32 精准广告拦截测试模块</string>
+    <!-- 刻意不写版本号：这里是静态资源，没有任何机制会随发版更新它，
+         写死版本只会让它长期停留在旧值（曾从 73532 一直烂到 73917）。
+         兼容版本以 README / module.prop 为准。 -->
+    <string name="module_description">番茄小说与红果免费短剧去广告模块。宿主升级后自动适配，不需要等新版本。</string>
 </resources>
