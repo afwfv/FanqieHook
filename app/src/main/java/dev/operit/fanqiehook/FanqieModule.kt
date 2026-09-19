@@ -266,9 +266,15 @@ class FanqieModule : XposedModule() {
         //                    strings present with identical occurrence counts to 73732;
         //                    DexKit-resolved impl identical (lf3.a). Hongguo 73718 not audited
         //                    (no APK available), hence not registered below.
+        //   73917 (7.3.9.17) Fanqie – 29/30 on device (skipped=1 is the Hongguo-only class, not
+        //                    installed here). Two obfuscated getters moved: the AdHooks targets now
+        //                    resolve by the stable config fields they read (`enableMultiSeriesFlowAd`
+        //                    → p(), `landscapeInsertAdEnable` → s0(); the old hardcoded `q0` now
+        //                    returns long and is a different config). DexKit-resolved ad impl moved
+        //                    lf3.a → eg3.a; fullscreen impl mb3.f. Hongguo 73917 not audited.
         // Versions sharing one AdHooks implementation because no target moved between them.
         val SUPPORTED_VERSION_CODES = mapOf(
-            "com.dragon.read" to setOf(73532L, 73718L, 73732L),
+            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L),
             "com.phoenix.read" to setOf(73532L, 73732L)
         )
 

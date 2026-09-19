@@ -62,20 +62,49 @@ class ModuleLog(
         writeStatus("$level $message")
     }
 
-    /** Append one line to the status file. Failures are ignored — diagnostics must never break the host. */
+    /**
+     * Append one line to the status file. Failures are ignored — diagnostics must never break the host.
+     *
+     * When the file crosses [MAX_STATUS_BYTES] we keep the most recent [KEEP_STATUS_BYTES] rather
+     * than wiping the file. Wiping was a self-inflicted bug: the previous version truncated to a
+     * single `... truncated ...` line, throwing away every diagnostic line written earlier in the
+     * same process — including the `unverified host version` warning and the per-hook skip reasons
+     * that the user would have needed to understand a post-upgrade regression.
+     */
     private fun writeStatus(text: String) {
         val f = statusFile ?: return
         runCatching {
-            if (f.length() > MAX_STATUS_BYTES) {
-                f.writeText("... truncated ...\n")
-            }
+            if (f.length() > MAX_STATUS_BYTES.toLong()) trim(f)
             f.appendText("${TIME_FORMAT.format(Date())} $text\n")
         }
     }
 
+    /**
+     * Roll the status file: keep the newest [KEEP_STATUS_BYTES] of its content (cut at a line
+     * boundary so we never preserve a half-written line) and prepend a marker.
+     */
+    private fun trim(f: File) {
+        val all = runCatching { f.readText() }.getOrNull() ?: run {
+            f.writeText("... status file could not be read for trimming ...\n")
+            return
+        }
+        val tail = if (all.length > KEEP_STATUS_BYTES) all.takeLast(KEEP_STATUS_BYTES) else all
+        val cut = tail.indexOf('\n')
+        val kept = if (cut >= 0 && cut + 1 < tail.length) tail.substring(cut + 1) else tail
+        f.writeText(
+            "... older lines dropped (file exceeded ${MAX_STATUS_BYTES / 1024} KB) ...\n$kept"
+        )
+    }
+
     private companion object {
         const val TAG = "FanqieHook"
-        const val MAX_STATUS_BYTES = 512L * 1024
+
+        /** Status file is rolled once it exceeds this size, in bytes. */
+        const val MAX_STATUS_BYTES = 256 * 1024
+
+        /** After a roll we keep this much recent content (cut at a line boundary), in bytes. */
+        const val KEEP_STATUS_BYTES = 192 * 1024
+
         val TIME_FORMAT = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
     }
 }

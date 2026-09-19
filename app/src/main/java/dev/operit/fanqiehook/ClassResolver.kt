@@ -2,6 +2,8 @@ package dev.operit.fanqiehook
 
 import android.os.Build
 import org.luckypray.dexkit.DexKitBridge
+import org.luckypray.dexkit.query.enums.UsingType
+import org.luckypray.dexkit.query.matchers.FieldMatcher
 import java.io.File
 import java.lang.reflect.Method
 import java.util.zip.ZipFile
@@ -211,6 +213,101 @@ class ClassResolver(
     // DexKit-backed lookups. Used for hooks whose target is obfuscated and may
     // move between Fanqie versions.
     // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 按「这个方法读取了哪个配置字段」定位一个无参 boolean getter。
+     *
+     * 为什么需要——这是实测踩到的坑：`ExperimentUtil` 上的开关是**混淆名**，宿主每次发版都
+     * 可能换字母。73732 上读 `ShortSeriesLandscapeInsertAdConfig#landscapeInsertAdEnable`
+     * 的是 `q0()Z`；73917 上 `q0` 变成了返回 `long` 的另一个配置，同一个开关搬到了 `s0()Z`。
+     * 继续硬编码名字的话，每发一版就要重新对一次字母（正是"每次更新都要重新适配"的来源之一）。
+     *
+     * 而它读取的**字段名是稳定的业务名**，所以按字段反查 getter 比按混淆名可靠得多。
+     * 已核验（DEX 静态）：
+     *   字段 `landscapeInsertAdEnable`      → 73732 `q0()Z`，73917 `s0()Z`
+     *   字段 `enableMultiSeriesFlowAd`      → 73732 `p()Z` ，73917 `p()Z`
+     * 判据（declaredClass + 无参 + 返回 boolean + 引用该字段）在两个版本上都只命中一个方法。
+     *
+     * **绝不猜**：命中多个时只接受其中唯一的一个 `static` 方法；仍然无法唯一确定就返回 null
+     * 并打 WARN。宁可少拦一条，也不要挂错开关——挂错是静默改错行为，比不挂危险得多。
+     */
+    fun findNoArgBooleanGetterReadingField(
+        className: String,
+        fieldName: String
+    ): Method? {
+        log.info("field-scoped lookup called: $className#$fieldName")
+        if (findClass(className) == null) {
+            log.warn("field-scoped lookup aborted: $className not loadable")
+            return null
+        }
+        val b = bridge()
+        if (b == null) {
+            log.warn("field-scoped lookup aborted: DexKit bridge unavailable")
+            return null
+        }
+        return try {
+            val hits = b.findMethod {
+                matcher {
+                    declaredClass(className)
+                    paramCount(0)
+                    returnType("boolean")
+                    // 注意：`addUsingField(String)` 会把字符串当**完整字段描述符**解析
+                    // （`Lcom/foo/Bar;->name:Z`），传裸字段名会抛
+                    // IllegalAccessError: not field descriptor: xxx。
+                    // 用只按名字匹配的 FieldMatcher 才对——同一字段名可能出现在多个类上
+                    // （本 APK 里 `landscapeInsertAdEnable` 就有两个 owner 类），
+                    // 按名字匹配可避开选错 owner。
+                    addUsingField(FieldMatcher().apply { name(fieldName) }, UsingType.Read)
+                }
+            }
+            log.info("field-scoped lookup raw hit count for $className#$fieldName: ${hits.size}")
+            val resolved = hits.mapNotNull { data ->
+                runCatching { data.getMethodInstance(classLoader) }.getOrNull()
+            }.filter { it.returnType == java.lang.Boolean.TYPE }
+
+            when {
+                resolved.size == 1 -> {
+                    resolved.first().apply { isAccessible = true }.also {
+                        log.info(
+                            "field-scoped lookup: $className#$fieldName -> " +
+                                "${it.declaringClass.name}#${it.name}"
+                        )
+                    }
+                }
+                resolved.isEmpty() -> {
+                    log.warn(
+                        "field-scoped lookup found no no-arg boolean getter reading " +
+                            "$className#$fieldName"
+                    )
+                    null
+                }
+                else -> {
+                    val statics = resolved.filter { java.lang.reflect.Modifier.isStatic(it.modifiers) }
+                    if (statics.size == 1) {
+                        statics.first().apply { isAccessible = true }.also {
+                            log.info(
+                                "field-scoped lookup: $className#$fieldName -> " +
+                                    "${it.declaringClass.name}#${it.name} (unique static of " +
+                                    "${resolved.size} candidates)"
+                            )
+                        }
+                    } else {
+                        log.warn(
+                            "field-scoped lookup ambiguous for $className#$fieldName: " +
+                                "${resolved.map { it.name }.sorted()} — refusing to guess"
+                        )
+                        null
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            log.warn(
+                "field-scoped lookup failed for $className#$fieldName " +
+                    "(${t.javaClass.simpleName}: ${t.message})"
+            )
+            null
+        }
+    }
 
     private var dexKitBridge: DexKitBridge? = null
     private var nativeLibLoaded = false
