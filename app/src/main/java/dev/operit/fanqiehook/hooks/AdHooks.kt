@@ -454,14 +454,20 @@ class AdHooks(
         )
         // 短剧广告总开关 + 横屏插入广告开关
         //
-        // 验证结果 (versionCodes 73532 与 73732, 番茄+红果 均有调用点):
-        //   - q0() → ShortSeriesLandscapeInsertAdConfig.landscapeInsertAdEnable (横屏插入广告)
-        //   - p()  → SeriesAdConfig.enableMultiSeriesFlowAd (系列信息流广告总开关)
-        //   - p0() 不存在,旧版硬编码为 p0 的 hook 会静默 WARN 跳过
-        // 73732 复核: 两者调用点数量与 73532 完全一致 (p: 8, q0: 6), 无需改动。
+        // 两个开关原本硬编码为 `ExperimentUtil#p()` / `ExperimentUtil#q0()`，但混淆名宿主
+        // 每次升级都可能换——实测 73732 的 `q0()Z` 在 73917 改名 `s0()Z`，原 `q0` 现在
+        // 返回 `long`，不再是这个开关。继续硬编码就要每次升级后重新对字母。
+        //
+        // 改用「按读取的稳定配置字段反查 getter」：字段名是业务名，跨版本不变；ClassResolver
+        // 用 DexKit 跑查询，唯一命中即用，多命中/不命中都返回 null 并 WARN（绝不在这里猜）。
+        // DexKit 不可用时回退按名字查——老版本仍能命中；73917 上 `q0` 解析为 long 方法，按
+        // `replaceBooleanFalse` 的返回类型检查自然跳过，至少不会挂错开关。
         hooks.replaceBooleanFalse(
             id = "short-series-ad-enable",
-            method = resolver.findMethod(
+            method = resolver.findNoArgBooleanGetterReadingField(
+                "com.dragon.read.reader.ad.experiment.ExperimentUtil",
+                "enableMultiSeriesFlowAd"
+            ) ?: resolver.findMethod(
                 "com.dragon.read.reader.ad.experiment.ExperimentUtil",
                 "p"
             ),
@@ -469,7 +475,10 @@ class AdHooks(
         )
         hooks.replaceBooleanFalse(
             id = "short-series-landscape-insert-ad",
-            method = resolver.findMethod(
+            method = resolver.findNoArgBooleanGetterReadingField(
+                "com.dragon.read.reader.ad.experiment.ExperimentUtil",
+                "landscapeInsertAdEnable"
+            ) ?: resolver.findMethod(
                 "com.dragon.read.reader.ad.experiment.ExperimentUtil",
                 "q0"
             ),

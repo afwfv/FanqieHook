@@ -22,6 +22,20 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 
 ## 未发布
 
+## 0.8.3
+v0.8.3 - 适配番茄小说 7.3.9.17（versionCode 73917）
+- 解决混淆名跨版本漂移：原本按 `ExperimentUtil#q0()` 硬编码的「横屏插入广告」开关，
+  在 73917 上被改名 `s0()Z`（原 `q0` 改成返回 `long` 成了另一个配置），硬编码路径下会静默
+  失效。改为按它读取的稳定字段 `landscapeInsertAdEnable` 反查 getter（ClassResolver 用
+  DexKit 按「无参 boolean 方法 + 读该字段」查表）；`enableMultiSeriesFlowAd`（系列信息流
+  总开关）也换成同样的字段反查。字段名是业务名、跨版本不变，以后宿主再改混淆字母不用重新适配
+- 修复状态文件丢诊断的 bug：之前超过上限会把整个文件清成一行 `... truncated ...`，把当次
+  启动的「unverified host version」WARN 和每个 hook 的跳过原因都冲掉——恰好是宿主升级后
+  定位问题最需要的那几行。改为保留最近 192 KB（按行边界对齐）
+- 73917 上 DexKit 自动跟进：广告实现类 `lf3.a` → `eg3.a`，全屏广告 `mb3.f`
+- 真机实测 73917：install summary `hooks installed=29 skipped=1`，`lost=[]`（唯一 skip 是
+  红果专有类，本机未装红果）
+
 ## 0.8.2
 v0.8.2 - 适配番茄小说 7.3.7.32（versionCode 73732）、红果免费短剧 7.3.7.32（73732）
 - 补拦红果推荐流里的广告位 `recommend_video`（真机实测该位置会走到广告可用性检查但此前
