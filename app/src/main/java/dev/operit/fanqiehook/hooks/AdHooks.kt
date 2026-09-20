@@ -50,6 +50,7 @@ class AdHooks(
         installShortSeriesAdHooks()
         installSplashAdHooks()
         installFullScreenAdHooks()
+        installUiPurifyHooks()
     }
 
 
@@ -275,6 +276,48 @@ class AdHooks(
                 )
                 true
             }
+        )
+    }
+
+    // 13. 界面净化（隐藏骚扰板块）
+    //
+    //   只隐藏"这个入口显不显示"的判断，不碰任何权益、会员、内容数据——与第 5 节的
+    //   VIP 入口隐藏同一性质，属于纯 UI 取舍。
+    //
+    //   搜索页的两个 AI 入口由 ssconfig 模板承载，模板字段是 public final，改不了；
+    //   但它们各自被 FanqieSearchActivity 上一个**无参 boolean 方法**读取，把那个方法
+    //   改成返回 false 就等于"这个入口不显示"：
+    //     模板字段 showFloatButton    ← FanqieSearchActivity#q1()Z   （73967）
+    //     模板字段 entryInBanner      ← FanqieSearchActivity#Y1()Z
+    //     模板字段 entryInSearchBox   ← FanqieSearchActivity#Z1()Z
+    //   三个方法名都是混淆名、会随版本换字母（和 ExperimentUtil 那次的坑一模一样），
+    //   所以一律走字段反查定位而不是硬编码方法名；命中不唯一时反查会返回 null 并打 WARN，
+    //   宁可少隐藏一个入口也不挂错方法。
+    //
+    //   静态核验（73967）：三个字段的读取者各自唯一——模板自身的 <init> 加上述一个方法；
+    //   按 declaredClass=FanqieSearchActivity 过滤后每个字段恰好一个命中。
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installUiPurifyHooks() {
+        val searchActivity = "com.dragon.read.component.biz.impl.FanqieSearchActivity"
+
+        // 搜索页 AI 悬浮球
+        hooks.replaceBooleanFalse(
+            id = "purify-search-ai-float-button",
+            method = resolver.findNoArgBooleanGetterReadingField(searchActivity, "showFloatButton"),
+            knownMissingOnMiss = true,
+        )
+        // 搜索页 banner 里的 AI 入口
+        hooks.replaceBooleanFalse(
+            id = "purify-search-ai-banner-entry",
+            method = resolver.findNoArgBooleanGetterReadingField(searchActivity, "entryInBanner"),
+            knownMissingOnMiss = true,
+        )
+        // 搜索框里的 AI 入口
+        hooks.replaceBooleanFalse(
+            id = "purify-search-ai-box-entry",
+            method = resolver.findNoArgBooleanGetterReadingField(searchActivity, "entryInSearchBox"),
+            knownMissingOnMiss = true,
         )
     }
 

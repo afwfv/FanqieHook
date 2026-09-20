@@ -20,7 +20,23 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 发出去的，用户直接收到了带无效功能的版本。宁可在 debug 上多待几天，也不要发一个
 自己没验过的版本。
 
-## 未发布
+## 0.8.5
+v0.8.5 - 适配番茄小说 7.3.9.67（versionCode 73967）
+- **界面净化（新增）**：隐藏搜索页的两个 AI 入口——banner 内入口、搜索框内入口，以及
+  搜索页 AI 悬浮球。目标方法名是混淆名（73967 上为 `FanqieSearchActivity#Y1/Z1/q1`），
+  但各自唯一读取一个稳定的 ssconfig 模板字段（`entryInBanner` / `entryInSearchBox` /
+  `showFloatButton`），因此复用已有的字段反查定位，宿主以后换字母可自动跟上。
+  纯 UI 显示判断，不触碰权益、会员、内容数据
+- 把 73967 加入审计集（`SUPPORTED_VERSION_CODES`），该版本启动时的
+  `unverified host version` WARN 变为 INFO。纯日志级别调整，不影响任何 hook。
+  73967 的核验依据写在 `FanqieModule` 的审计注释里：静态复核（两个 `ExperimentUtil`
+  getter 仍按字段唯一命中、37 个位置名零缺失、实现类仍为 `eg3.a` / `mb3.f`）
+  加上真机实测（`installed=29 skipped=1`、`lost=[]`，且记录到 73732 → 73967
+  原地升级时字段反查自动由 `q0` 跟到 `s0`）
+- 未纳入的净化项（各自缺干净目标或风险过高）：角标红点（`MineRedDotManager` 只被自身与
+  `hf4.e#run()` 引用，无可翻转的布尔门控）、搜索词轮播（Compose View，方法多为 void）、
+  小说推荐位（主内容瀑布流，误 hook 会破坏首页）、会员特权卡（位于权益数据层，
+  只找 UI 层显示门控，不碰权益 getter）
 
 ## 0.8.4
 v0.8.4 - 适配番茄小说 7.3.9.67（versionCode 73967）
