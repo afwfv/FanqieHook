@@ -21,6 +21,12 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 自己没验过的版本。
 
 ## 未发布
+- 把 73967 加入审计集（`SUPPORTED_VERSION_CODES`），该版本启动时的
+  `unverified host version` WARN 变为 INFO。纯日志级别调整，不影响任何 hook。
+  73967 的核验依据写在 `FanqieModule` 的审计注释里：静态复核（两个 `ExperimentUtil`
+  getter 仍按字段唯一命中、37 个位置名零缺失、实现类仍为 `eg3.a` / `mb3.f`）
+  加上真机实测（`installed=29 skipped=1`、`lost=[]`，且记录到 73732 → 73967
+  原地升级时字段反查自动由 `q0` 跟到 `s0`）。
 
 ## 0.8.4
 v0.8.4 - 适配番茄小说 7.3.9.67（versionCode 73967）

@@ -272,9 +272,21 @@ class FanqieModule : XposedModule() {
         //                    → p(), `landscapeInsertAdEnable` → s0(); the old hardcoded `q0` now
         //                    returns long and is a different config). DexKit-resolved ad impl moved
         //                    lf3.a → eg3.a; fullscreen impl mb3.f. Hongguo 73917 not audited.
+        //   73967 (7.3.9.67) Fanqie – 29/30 on device (skipped=1 is the Hongguo-only class, not
+        //                    installed here). Statically re-checked against the 73967 APK:
+        //                      - both `ExperimentUtil` getters still resolve uniquely by the config
+        //                        field they read (`enableMultiSeriesFlowAd` → p(),
+        //                        `landscapeInsertAdEnable` → s0()); AB table lives in eg3.a#b
+        //                        and holds 40 position names
+        //                      - all 37 module position strings (22 blocked + 15 reward) are present
+        //                        in the host string pool, zero missing
+        //                      - ad impl still eg3.a, fullscreen impl still mb3.f
+        //                    A real in-place upgrade 73732 → 73967 was also observed on a test
+        //                    device, where the field-scoped lookup followed the renamed getter by
+        //                    itself (q0 → s0) with no code change. Hongguo 73967 not audited.
         // Versions sharing one AdHooks implementation because no target moved between them.
         val SUPPORTED_VERSION_CODES = mapOf(
-            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L),
+            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L, 73967L),
             "com.phoenix.read" to setOf(73532L, 73732L)
         )
 
