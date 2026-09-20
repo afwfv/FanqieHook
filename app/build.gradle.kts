@@ -13,8 +13,8 @@ android {
         applicationId = "dev.operit.fanqiehook"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.8.3"
+        versionCode = 27
+        versionName = "0.8.4"
 
         // DexKit 的 libdexkit.so 必须在宿主进程内加载，因此只需要宿主实际使用的 ABI。
         // 已核验：番茄小说 73532 与 73732 的 APK 都只打包 arm64-v8a（117 / 116 个 .so 全在
