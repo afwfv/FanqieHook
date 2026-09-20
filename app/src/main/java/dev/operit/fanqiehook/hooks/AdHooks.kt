@@ -252,25 +252,28 @@ class AdHooks(
             shouldBlock = { args ->
                 val position = args.getOrNull(0)?.toString().orEmpty()
                 val source = args.getOrNull(1)
-                val blocked = position in BLOCKED_POSITIONS
-                if (blocked) {
-                    log.info("blocked ad position=$position source=$source via $className.checkAdAvailable")
-                } else if (LOG_UNLISTED_POSITIONS &&
-                    position.isNotEmpty() &&
-                    position !in PRESERVED_POSITIONS &&
-                    reportedPositions.add(position)
-                ) {
-                    // Debug-grade discovery: the ad-position namespace is server-driven and grows
-                    // silently between releases. Anything the block list does not know about (and
-                    // is not a deliberate keep) gets reported exactly once per process, so the next
-                    // adaptation round can extend BLOCKED_POSITIONS from real device data instead
-                    // of guesswork. Log-only: the return value is unaffected.
-                    log.info(
-                        "unlisted ad position=$position source=$source via $className.checkAdAvailable " +
-                            "(not blocked; report upstream so it can be classified)"
-                    )
+                // 零广告：checkAdAvailable 问的是「这个位置现在能不能出广告」，一律回答「不能」，
+                // 于是任何广告位都拿不到广告。不再区分被动位 / 用户主动的激励金币位 / 未知位，
+                // 也不再需要维护拦截名单——宿主以后新增广告位同样自动被拦。
+                //
+                // 只影响本查询的返回值，不触碰任何权益数据、会员状态或服务端校验的东西。
+                // 代价：用户主动点的「看视频得金币 / 免广告 / 催更 / 解锁章节」等入口会失效，
+                // 因为那里已经无广告可播。
+                //
+                // 日志仍按来源分类，便于回看拦到了什么：
+                //   (passive)  名单里的被动广告位
+                //   (reward)   原本保留的激励/金币位
+                //   (unnamed)  两边名单都没有的新位置
+                val kind = when {
+                    position in BLOCKED_POSITIONS -> "passive"
+                    position in PRESERVED_POSITIONS -> "reward"
+                    else -> "unnamed"
                 }
-                blocked
+                log.info(
+                    "blocked ad position=$position source=$source " +
+                        "kind=$kind via $className.checkAdAvailable"
+                )
+                true
             }
         )
     }
@@ -630,18 +633,20 @@ class AdHooks(
         )
 
         /**
-         * Positions that deliberately stay ENABLED. All of them are user-initiated reward / coin
-         * surfaces — blocking them would remove the user's ability to earn coins by watching a
-         * video, which this module explicitly preserves.
+         * Positions that are **user-initiated reward / coin surfaces** — the user taps something
+         * like "看视频得金币", "看视频免广告", "看视频解锁章节" and thereby asks for a video.
+         *
+         * These are **also blocked now**: the position filter answers "no ad available" for every
+         * position (零广告), so this set no longer changes what gets blocked. It is kept as the
+         * record of the call-site analysis and is still used to tag the log line with `kind=reward`
+         * so a block caused by a user tapping a reward entry is distinguishable afterwards.
          *
          * Analysed call sites:
          *   - `reader_gold_coin_popup` — 金币弹窗
          *   - `video_tts_ad` / `video_voice_ad` — 听书激励入口（AudioInspireUtil.adUnavailable）
          *   - `video_reward_gift_ad` — 激励视频礼包
          *   - `video_reader_end_urge_update` — 看视频催更
-         *
-         * Listing them here (rather than only omitting them) keeps the intent explicit and stops
-         * the discovery logger from re-reporting them as unclassified.
+         *   - 73967 复核补入的 9 个 video_* 见集合内注释
          */
         val PRESERVED_POSITIONS = setOf(
             "reader_gold_coin_popup",
@@ -651,8 +656,7 @@ class AdHooks(
             "video_reader_end_urge_update",
             // v0.8.2：把 checkAdAvailableByAbTest 表里剩下的金币 / 奖励位一次性登记齐全。
             // 这些名字里带 coin / reward，语义无歧义，都是"看广告换金币/奖励"的**用户主动**
-            // 流程——正是本模块明确保留的激励视频。登记进来是为了让意图显式化，
-            // 同时避免 unlisted 日志把它们反复报成"待分类"。
+            // 流程。登记进来是为了让意图显式化，而不是让它们绕过日志分类。
             "gold_coin_reward_box_other",
             "gold_coin_reward_box_welfare",
             "gold_coin_reward_dialog_ad_audio_page",
@@ -668,9 +672,8 @@ class AdHooks(
             //   - video_chapter_front  ← FanqieRewardAdRequestConfigServiceImpl（激励广告请求配置）
             //   - video_book_download  ← NsVipImpl#evaluateBookDownloadPrivilege（VIP 特权评估）
             //   - 其余 7 个只被配置查询引用（eg3.a#b/e、fs1.a#b/d、mv1.b#m），
-            //     与已保留的 reader_gold_coin_popup 等同一族
-            // 即「看视频解锁/换取某功能」的用户主动流程，属于本模块明确保留的激励视频。
-            // 登记它们只是让意图显式化并止住 unlisted 日志（本集合不参与拦截判定）。
+            //     与 reader_gold_coin_popup 等同一族
+            // 即「看视频解锁/换取某功能」的用户主动流程。
             "video_chapter_front",
             "video_chapter_middle",
             "video_book_download",
@@ -682,37 +685,8 @@ class AdHooks(
             "video_short_story"
         )
 
-        /**
-         * 故意留在两个集合之外、尚未分类的位置（73967 AB 表复核结果）。
-         *
-         *   intelligence_ad —— 全 APK 只有 4 处引用，全在配置门控里
-         *   （eg3.a#b/e、fs1.a#b/d），**没有任何奖励 / 解锁 / VIP 体系的痕迹**，
-         *   看起来像被动广告位，但目前也找不到广告请求点，缺乏正面证据。
-         *
-         * 按本模块「按调用点证据分类、不按名字猜」的原则，不把它塞进 BLOCKED_POSITIONS：
-         * 猜错会拦掉用户的正常流程。保持未分类的好处是它一旦真的被请求，
-         * [LOG_UNLISTED_POSITIONS] 就会把它报出来，届时再按真机证据定性。
-         * 73967 真机日志中至今没有该位置的 unlisted 记录，即当前使用路径未触及。
-         */
-        const val UNCLASSIFIED_BY_DESIGN = "intelligence_ad"
-
-        /**
-         * Log each previously-unseen ad position once per process (log-only; never changes the
-         * hook's return value). Purpose: the position namespace is server-driven and grows without
-         * any APK-side signal, so this turns every device into an instrument for finding the next
-         * gap. Disable if the extra INFO lines are unwanted.
-         */
-        const val LOG_UNLISTED_POSITIONS = true
-
         // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
         // to skip install-source reporting, which may affect compliance. Review before shipping.
         const val ENABLE_ATTRIBUTION_SPLASH_BYPASS = false
     }
-
-    /**
-     * Positions already reported by [LOG_UNLISTED_POSITIONS]; process-scoped so a hot reload
-     * starts a fresh discovery pass. Concurrent because hook callbacks arrive on many threads.
-     */
-    private val reportedPositions: MutableSet<String> =
-        java.util.concurrent.ConcurrentHashMap.newKeySet()
 }
