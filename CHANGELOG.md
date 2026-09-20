@@ -21,6 +21,11 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 自己没验过的版本。
 
 ## 未发布
+- **界面净化（新增）**：隐藏搜索页的两个 AI 入口——banner 内入口、搜索框内入口，以及
+  搜索页 AI 悬浮球。目标方法名是混淆名（73967 上为 `FanqieSearchActivity#Y1/Z1/q1`），
+  但各自唯一读取一个稳定的 ssconfig 模板字段（`entryInBanner` / `entryInSearchBox` /
+  `showFloatButton`），因此复用已有的字段反查定位，宿主以后换字母可自动跟上。
+  纯 UI 显示判断，不触碰权益、会员、内容数据。
 - 把 73967 加入审计集（`SUPPORTED_VERSION_CODES`），该版本启动时的
   `unverified host version` WARN 变为 INFO。纯日志级别调整，不影响任何 hook。
   73967 的核验依据写在 `FanqieModule` 的审计注释里：静态复核（两个 `ExperimentUtil`
