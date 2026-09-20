@@ -662,8 +662,39 @@ class AdHooks(
             "video_gold_coin_reward_dialog_general",
             "video_gold_coin_reward_dialog_open_treasure",
             "listen_coin",
-            "video_coin_ad"
+            "video_coin_ad",
+            // 73967 复核：把 AB 表 (checkAdAvailableByAbTest) 里剩下未分类的 9 个 video_*
+            // 一次性登记。判据是调用点证据，不是名字：
+            //   - video_chapter_front  ← FanqieRewardAdRequestConfigServiceImpl（激励广告请求配置）
+            //   - video_book_download  ← NsVipImpl#evaluateBookDownloadPrivilege（VIP 特权评估）
+            //   - 其余 7 个只被配置查询引用（eg3.a#b/e、fs1.a#b/d、mv1.b#m），
+            //     与已保留的 reader_gold_coin_popup 等同一族
+            // 即「看视频解锁/换取某功能」的用户主动流程，属于本模块明确保留的激励视频。
+            // 登记它们只是让意图显式化并止住 unlisted 日志（本集合不参与拦截判定）。
+            "video_chapter_front",
+            "video_chapter_middle",
+            "video_book_download",
+            "video_comic_book_download",
+            "video_reader_ad_free_dialog",
+            "video_reader_auto_page_turn",
+            "video_reader_offline_reading",
+            "video_reading_latest_chapter",
+            "video_short_story"
         )
+
+        /**
+         * 故意留在两个集合之外、尚未分类的位置（73967 AB 表复核结果）。
+         *
+         *   intelligence_ad —— 全 APK 只有 4 处引用，全在配置门控里
+         *   （eg3.a#b/e、fs1.a#b/d），**没有任何奖励 / 解锁 / VIP 体系的痕迹**，
+         *   看起来像被动广告位，但目前也找不到广告请求点，缺乏正面证据。
+         *
+         * 按本模块「按调用点证据分类、不按名字猜」的原则，不把它塞进 BLOCKED_POSITIONS：
+         * 猜错会拦掉用户的正常流程。保持未分类的好处是它一旦真的被请求，
+         * [LOG_UNLISTED_POSITIONS] 就会把它报出来，届时再按真机证据定性。
+         * 73967 真机日志中至今没有该位置的 unlisted 记录，即当前使用路径未触及。
+         */
+        const val UNCLASSIFIED_BY_DESIGN = "intelligence_ad"
 
         /**
          * Log each previously-unseen ad position once per process (log-only; never changes the
