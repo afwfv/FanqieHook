@@ -284,9 +284,30 @@ class FanqieModule : XposedModule() {
         //                    A real in-place upgrade 73732 → 73967 was also observed on a test
         //                    device, where the field-scoped lookup followed the renamed getter by
         //                    itself (q0 → s0) with no code change. Hongguo 73967 not audited.
+        //   73932 (7.3.9.32) Fanqie – 相对 73967 全表静态复核，零漂移：
+        //                      - 25 条番茄侧目标（类 + 方法 + 参数 + 返回类型）逐条命中，唯一
+        //                        缺失仍是红果专属 HongguoBannerServiceImpl（番茄侧本来就不存在）
+        //                      - 46 个位置名（22 blocked + 24 preserved）在字符串池里零缺失；
+        //                        广告位 AB 表仍在 eg3.a，45 个位置常量与 73967 逐个一致
+        //                        （含 intelligence_ad / screen_off_ad 两个未分类位）
+        //                      - 字段反查落点未变：ExperimentUtil#p()（enableMultiSeriesFlowAd）、
+        //                        ExperimentUtil#s0()（landscapeInsertAdEnable）、
+        //                        FanqieSearchActivity#q1()/#Y1()/#Z1()（三个 AI 入口字段）
+        //                      - DexKit 接口落点未变：广告配置实现 eg3.a、全屏广告实现 mb3.f
+        //                        （零参 boolean 门控 a / onScreenAdDialogShow）
+        //                      - 32 条 hook 的 invoke 调用点数与 73967 逐条相同（0 条死 hook），
+        //                        ad 命名空间无新增类、无删除类（306084 → 306128 个类）
+        //                    真机实测（本机 73932，v0.8.6）：install summary
+        //                    `hooks installed=32 skipped=1 known-missing=[hongguo-banner-join-revert]`，
+        //                    lost=[]；状态文件里实测拦到 reader_banner / video_reader_ad /
+        //                    creator_ad / splash_ad 以及 canShowScreenAd 闸门，hook 确实在活链路上。
+        //                    对照：未登记的 v0.8.5 在同一台 73932 上同样是 32/33 条，
+        //                    只多一条 `unverified host version` 警告 —— 即本版本纯登记，行为不变。
+        //                    结论：该版本不需要改任何 hook 代码，只是把版本登记进审计集。
+        //                    Hongguo 73932 未审计（无对应 APK）。
         // Versions sharing one AdHooks implementation because no target moved between them.
         val SUPPORTED_VERSION_CODES = mapOf(
-            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L, 73967L),
+            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L, 73967L, 73932L),
             "com.phoenix.read" to setOf(73532L, 73732L)
         )
 
