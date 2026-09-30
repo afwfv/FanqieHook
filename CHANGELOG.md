@@ -32,7 +32,13 @@ v0.8.6 - 适配番茄小说 7.3.9.32（versionCode 73932）
 - 真机实测（本机 73932）：`hooks installed=32 skipped=1 known-missing=[hongguo-banner-join-revert]`、
   `lost=[]`（唯一跳过的是红果专属类，番茄侧本来就没有）；状态文件里实测拦到
   reader_banner / video_reader_ad / creator_ad / splash_ad 以及开屏闸门 canShowScreenAd
-- 红果免费短剧 73932 未审计（手上没有对应 APK）
+- **红果免费短剧 7.3.9.32（73932）一并登记**：26 条目标（含红果专属 banner 服务）逐条命中、
+  46 个广告位名零缺失、广告位总表与 73732 完全一致；DexKit 落点跟着改名自动跟上
+  （广告配置 `yb3.a` → `tc3.a`、全屏广告 `g73.f` → `a83.f`），零死 hook
+- 红果真机实测（本机 73932）：`hooks installed=30 skipped=3`，跳过的 3 条是搜索页 AI 净化
+  （红果没有对应界面，属预期缺失），`lost=[]`；实测拦到 creator_ad 与开屏闸门
+- 红果这次版本更新新增了一批激励广告类（`IDrawRewardAdService` 等 23 个新类），
+  零广告模式下广告位过滤一律返回「无广告」，新位置不用登记也自动拦
 
 ## 0.8.5
 v0.8.5 - 适配番茄小说 7.3.9.67（versionCode 73967）

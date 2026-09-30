@@ -304,11 +304,29 @@ class FanqieModule : XposedModule() {
         //                    对照：未登记的 v0.8.5 在同一台 73932 上同样是 32/33 条，
         //                    只多一条 `unverified host version` 警告 —— 即本版本纯登记，行为不变。
         //                    结论：该版本不需要改任何 hook 代码，只是把版本登记进审计集。
-        //                    Hongguo 73932 未审计（无对应 APK）。
+        //   73932 (7.3.9.32) Hongguo – 相对 73732 全表静态复核：
+        //                      - 26 条目标（含红果专属 HongguoBannerServiceImpl）逐条命中
+        //                      - 46 个位置名零缺失；广告位 AB 表 45 个位置常量与 73732 逐个一致
+        //                      - 字段反查落点未变：ExperimentUtil#p()/#s0()；搜索页三个 AI 入口
+        //                        在红果上没有宿主类（FanqieSearchActivity 不存在），本来就跳过，
+        //                        已标注 known-missing，不会算进「丢失」
+        //                      - DexKit 落点随改名自动跟上：广告配置实现 yb3.a → tc3.a，
+        //                        全屏广告实现 g73.f → a83.f（零参 boolean 门控 a /
+        //                        onScreenAdDialogShow 不变）
+        //                      - 32 条 hook 里唯一调用点数变化的是 ExperimentUtil#s0()（4 → 6 个
+        //                        调用点，变多不是变没），其余逐条相同，0 条死 hook
+        //                      - 该版本 ad 命名空间新增 23 个类（含新的 IDrawRewardAdService /
+        //                        DrawRewardAdServiceImpl 激励广告服务）—— 零广告模式下 checkAdAvailable
+        //                        一律返回「无广告」，新位无需登记也自动拦
+        //                    真机实测（本机 73932，v0.8.6）：install summary
+        //                    `hooks installed=30 skipped=3 known-missing=[purify-search-ai-float-button,
+        //                    purify-search-ai-banner-entry, purify-search-ai-box-entry]`，lost=[]；
+        //                    实测拦到 creator_ad（via tc3.a）与 canShowScreenAd 闸门。
+        //                    结论：该版本不需要改任何 hook 代码，只是把版本登记进审计集。
         // Versions sharing one AdHooks implementation because no target moved between them.
         val SUPPORTED_VERSION_CODES = mapOf(
             "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L, 73967L, 73932L),
-            "com.phoenix.read" to setOf(73532L, 73732L)
+            "com.phoenix.read" to setOf(73532L, 73732L, 73932L)
         )
 
         val TARGET_PACKAGES = SUPPORTED_VERSION_CODES.keys
