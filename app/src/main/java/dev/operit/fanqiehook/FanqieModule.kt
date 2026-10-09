@@ -54,6 +54,12 @@ class FanqieModule : XposedModule() {
             "module loaded: process=$processName api=$apiVersion " +
                 "framework=$frameworkName v${frameworkVersion}"
         )
+        // 这条只在框架日志/logcat 里，状态文件要等 onPackageReady 才开；两处都写是为了
+        // 「模块加载了但没走到 onPackageReady」这种报告也能看出跑的是哪个构建。
+        log.info(
+            "module build: " +
+                ModuleMeta.describe(runCatching { getModuleApplicationInfo()?.sourceDir }.getOrNull())
+        )
     }
 
     override fun onPackageLoaded(param: PackageLoadedParam) {
@@ -114,8 +120,14 @@ class FanqieModule : XposedModule() {
         }
 
         log.info(
-            "target ready: package=$packageName process=$processName versionCode=$versionCode"
+            "target ready: package=$packageName process=$processName versionCode=$versionCode " +
+                "uid=${param.applicationInfo.uid} hostApk=${param.applicationInfo.sourceDir}"
         )
+
+        // 自报构建：报告「装了但没效果」时，第一件事是确认进程里跑的到底是哪个版本，
+        // 而不是相信口述（升级没成功 / 装了两份 / 管理器显示和实际加载不是同一个包都可能）。
+        val moduleApkPath = runCatching { getModuleApplicationInfo()?.sourceDir }.getOrNull()
+        log.info("module build: ${ModuleMeta.describe(moduleApkPath)}")
 
         val resolver = ClassResolver(
             classLoader = param.classLoader,
@@ -126,11 +138,23 @@ class FanqieModule : XposedModule() {
             // The module's own APK: source of libdexkit.so. DexKit never loads it itself, and in
             // an injected host process System.loadLibrary cannot see the host's lib path, so the
             // resolver must extract + System.load() it from here (see ClassResolver docs).
-            moduleApkPath = runCatching { getModuleApplicationInfo()?.sourceDir }.getOrNull(),
+            moduleApkPath = moduleApkPath,
             // Host-writable dir used when the .so must be extracted (module runs as host UID).
             hostDataDir = param.applicationInfo.dataDir
         )
-        val manager = HookManager(this, log).also { hookManager = it }
+        // 命中审计开关：宿主 cache 目录下存在 `fanqiehook.audit` 即打开（发布版也能用，
+        // 不需要专门出一个诊断包）。排查「偶发漏拦」时让用户建这个文件复现一次，
+        // 日志里就能看出那一刻宿主到底问没问我们的闸门。
+        val auditMarker = runCatching {
+            File(param.applicationInfo.dataDir, "cache/fanqiehook.audit")
+        }.getOrNull()
+        val auditHits = auditMarker?.exists() == true
+        log.info(
+            "hook hit audit: " +
+                if (auditHits) "ON (${auditMarker?.path})" else "off"
+        )
+
+        val manager = HookManager(this, log, auditHits = auditHits).also { hookManager = it }
 
         // Single entry point for every ad-related hook.
         // Each `installXxx` is internally try/catch; one failure cannot stop the rest.

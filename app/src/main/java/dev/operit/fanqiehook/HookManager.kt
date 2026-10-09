@@ -18,7 +18,17 @@ import java.lang.reflect.Method
  */
 class HookManager(
     private val module: XposedModule,
-    private val log: ModuleLog
+    private val log: ModuleLog,
+    /**
+     * 命中审计开关：打开后每条 hook 被真实调用的瞬间都会写一行 `hook hit[n]: <id>`。
+     *
+     * 默认关（发布版日志保持安静）。由宿主 cache 目录下的标记文件 `fanqiehook.audit` 打开，
+     * 见 [dev.operit.fanqiehook.FanqieModule]。存在的意义是排查「偶发漏拦」这类报告：
+     * 用户说看到广告但日志里什么都没发生时，唯一能把问题钉死的信息就是「那一刻宿主到底问没问
+     * 我们的闸门」—— 有 `hook hit` 说明宿主拿到 false 还是播了（得换 hook 点），
+     * 没有说明这条链路压根没走这些方法（得找新入口）。
+     */
+    private val auditHits: Boolean = false
 ) {
 
     private val installed = mutableListOf<HookHandle>()
@@ -191,7 +201,7 @@ class HookManager(
      * 之后每 [AUDIT_EVERY] 次再记一行，用来确认它仍在被调用。
      */
     private fun auditHit(id: String) {
-        if (!AUDIT_HOOK_HITS) return
+        if (!auditHits) return
         val n = hitCounts.merge(id, 1, Int::plus) ?: 1
         if (n <= AUDIT_MAX_LOGS || n % AUDIT_EVERY == 0) {
             log.info("hook hit[$n]: $id")
@@ -240,14 +250,12 @@ class HookManager(
 
     private companion object {
         /**
-         * 是否记录 hook 命中（每个 id 前 3 次 + 之后每 200 次一条）。
+         * 命中审计的记法：每个 id 前 [AUDIT_MAX_LOGS] 次记一行，之后每 [AUDIT_EVERY] 次再记一行。
          *
-         * 真机核验 hook 是否真的在链路上时打开它——`replaceBooleanFalse` 这类 hook 命中时是
-         * 静默的，不开审计就只能靠"目标方法存在 + 调用点数量没变"来推断，而那并不能证明
-         * 它真的被调用过。发布版保持 false，日志更安静。
+         * 开关本身是构造参数 [auditHits]（由宿主 cache 目录里的 `fanqiehook.audit` 标记文件
+         * 控制），不是编译期常量 —— 排查偶发漏拦时用户得能在**发布版**上自己打开它复现，
+         * 而不是等一个新的诊断包。
          */
-        const val AUDIT_HOOK_HITS = false
-
         const val AUDIT_MAX_LOGS = 3
         const val AUDIT_EVERY = 200
     }
