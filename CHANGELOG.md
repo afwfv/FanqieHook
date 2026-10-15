@@ -20,6 +20,20 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 发出去的，用户直接收到了带无效功能的版本。宁可在 debug 上多待几天，也不要发一个
 自己没验过的版本。
 
+## 0.8.8
+v0.8.8 - 修「偶尔漏出一条广告」
+- 广告位过滤（`checkAdAvailable`）此前是**唯一一条没有 deoptimize 的 hook**。用 DexSQL 对
+  73932 宿主做全量调用图复核后确认：这条方法是主进程里所有广告位可用性的**唯一汇聚点** ——
+  AB 表方法 `b(String)` 只被它调用，不带 source 的包装 `c(String)`（日志名
+  `checkAdAvailableWithoutSource`）也只是转调 `checkAdAvailable(position, null)`，
+  其余 44 个调用点全部直接打在它上面
+- 也就是说：这条 hook 生效时任何位置都拿不到广告，而**只要有一个调用点没被 hook 住，它就会
+  原样拿到真实判定结果**。ART 会把这种高频小方法内联进调用方，内联出去的副本不经过 hook，
+  表现正是「大部分时候拦住了、偶尔漏一条，日志里连一行都没有」。其余闸门（阅读器、TopView、
+  开屏、听书）一直是 `deoptimize = true`，只有这条当初写成了 `false`
+- 现在改成 `deoptimize = true`，与其余闸门一致。拦截范围、拦截名单、日志格式都没变
+- 只影响首次安装/升级后的第一次启动（重建 hook 时多做一次 deoptimize）
+
 ## 0.8.7
 v0.8.7 - 排查线索增强（模块自报版本）
 - 日志与状态文件新增一行 `module build: version=v0.8.7 (versionCode=30) apk=/data/app/…`。
