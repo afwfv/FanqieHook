@@ -249,7 +249,20 @@ class AdHooks(
         hooks.installBooleanFilter(
             id = "position-filter:$className",
             method = method,
-            deoptimize = false,
+            // 必须 deoptimize —— 这条是**唯一**一条曾经漏掉的。
+            //
+            // 静态复核（73932，DexSQL 全量调用图）确认 `checkAdAvailable` 是主进程里所有广告位
+            // 可用性的**唯一汇聚点**：AB 表方法 `b(String)` 只被它调用，不带 source 的包装
+            // `c(String)`（日志名 checkAdAvailableWithoutSource）也只是
+            // `checkAdAvailable(position, null)`，其余 44 个调用点全部直接打在这里。
+            // 也就是说：只要这条 hook 生效，任何位置都拿不到广告；反过来说，**只要有一个调用点
+            // 没被 hook 住，它就会原样拿到真实判定结果**。
+            //
+            // 而 ART 会把这种被高频调用的小方法内联进调用方，内联出去的副本不经过 hook ——
+            // 表现正是用户报的那种「大部分时候拦住了、偶尔漏一条，日志里连一行记录都没有」。
+            // 其余闸门（阅读器、TopView、开屏、听书）一直是 deoptimize = true，只有这条当初
+            // 写成了 false，所以漏拦只可能出在它身上。
+            deoptimize = true,
             shouldBlock = { args ->
                 val position = args.getOrNull(0)?.toString().orEmpty()
                 val source = args.getOrNull(1)
