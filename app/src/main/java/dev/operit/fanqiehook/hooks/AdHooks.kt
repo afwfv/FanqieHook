@@ -3,6 +3,7 @@ package dev.operit.fanqiehook.hooks
 import dev.operit.fanqiehook.ClassResolver
 import dev.operit.fanqiehook.HookManager
 import dev.operit.fanqiehook.ModuleLog
+import java.lang.reflect.Modifier
 
 /**
  * All ad-related hooks for `com.dragon.read` versionCodes 73532 (v7.3.5.32) through 74132 (v7.4.1.32).
@@ -48,6 +49,8 @@ class AdHooks(
         installAudioAdHooks()
         installExperimentalSplashHook()
         installShortSeriesAdHooks()
+        installReaderShortSeriesBannerHook()
+        installSeriesGuideHook()
         installSplashAdHooks()
         installFullScreenAdHooks()
         installUiPurifyHooks()
@@ -541,6 +544,67 @@ class AdHooks(
                 "com.dragon.read.reader.ad.experiment.ExperimentUtil",
                 "q0"
             ),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10a. Reader short-series promotion banner
+    //
+    //   The novel reader has a separate short-series recommendation banner path that
+    //   does not use the bookmall bottom-tab entry and can bypass the generic position
+    //   gate. Its provider wrapper is v93.d; r() is the concrete show animation:
+    //     v93.d#r() -> fade child view in -> callback.F(view)
+    //   No-op only this show entry. Reader content, the short-series tab, and direct
+    //   short-series pages remain untouched.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installReaderShortSeriesBannerHook() {
+        hooks.install(
+            id = "reader-short-series-banner-show",
+            method = resolver.findMethod("v93.d", "r"),
+            deoptimize = true,
+            body = { /* no-op: suppress the reader-only short-series promotion banner */ },
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 10b. Novel-page short-series promotion guide
+    //
+    //   This is not an ad-slot decision and therefore bypasses checkAdAvailable().
+    //   Fanqie 7.4.1.32 shows it through the obfuscated SeriesGuideManager (a34.o):
+    //     SeriesLaunchGuideConfig.enable -> manager.f()Z -> Pop.series_guide_bottom_banner
+    //   The stable type used by the manager is SeriesGuideFloatingView, while the manager's
+    //   class/package and method names are obfuscated. Resolve the q0 implementation that owns
+    //   the one-argument SeriesGuideFloatingView callback, then force its static enable gate off.
+    //   This removes only the promotion guide; the short-series tab/content remains available.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun installSeriesGuideHook() {
+        val guideView = resolver.findClass(
+            "com.dragon.read.component.biz.impl.bookmall.videotab.guide.SeriesGuideFloatingView"
+        ) ?: return
+
+        val manager = resolver.findClassImplementingInterface(
+            "ym4.q0",
+            methodName = "onLoginFailed"
+        ).firstOrNull { cls ->
+            cls.declaredMethods.any { method ->
+                method.name == "h" &&
+                    method.parameterCount == 1 &&
+                    method.parameterTypes[0] == guideView
+            }
+        }
+        val enableGate = manager?.declaredMethods?.firstOrNull { method ->
+            method.name == "f" &&
+                method.parameterCount == 0 &&
+                method.returnType == java.lang.Boolean.TYPE &&
+                Modifier.isStatic(method.modifiers)
+        }?.apply { isAccessible = true }
+
+        hooks.replaceBooleanFalse(
+            id = "series-guide-promotion-enable",
+            method = enableGate,
+            deoptimize = true,
         )
     }
 

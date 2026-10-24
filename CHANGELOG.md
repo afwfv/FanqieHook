@@ -20,6 +20,12 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 发出去的，用户直接收到了带无效功能的版本。宁可在 debug 上多待几天，也不要发一个
 自己没验过的版本。
 
+## 0.9.0
+v0.9.0 - 去除小说阅读器内短剧推广
+- 拦截小说阅读器短剧推荐 banner 的显示动画（`v93.d#r()`）
+- 同时关闭小说页短剧导流提示，保留书城底部“短剧”入口和短剧内容
+- USB 真机 `9df37f6f` 实测：`reader-short-series-banner-show` 与 `series-guide-promotion-enable` 均安装成功
+
 ## 0.8.8
 v0.8.8 - 修「偶尔漏出一条广告」
 - 广告位过滤（`checkAdAvailable`）此前是**唯一一条没有 deoptimize 的 hook**。用 DexSQL 对
