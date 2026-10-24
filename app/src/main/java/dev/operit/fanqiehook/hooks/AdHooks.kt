@@ -5,7 +5,7 @@ import dev.operit.fanqiehook.HookManager
 import dev.operit.fanqiehook.ModuleLog
 
 /**
- * All ad-related hooks for `com.dragon.read` versionCodes 73532 (v7.3.5.32) and 73732 (v7.3.7.32).
+ * All ad-related hooks for `com.dragon.read` versionCodes 73532 (v7.3.5.32) through 74132 (v7.4.1.32).
  *
  * Audit status (DEX-level; re-run the whole target audit for every supported versionCode):
  *

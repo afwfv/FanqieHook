@@ -1,0 +1,358 @@
+package dev.operit.fanqiehook
+
+import android.content.pm.PackageInfo
+import java.io.File
+import io.github.libxposed.api.XposedModule
+import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
+import io.github.libxposed.api.XposedModuleInterface.HotReloadingParam
+import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
+import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
+import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import dev.operit.fanqiehook.hooks.AdHooks
+
+/**
+ * Modern libxposed API 102 entry point.
+ *
+ * Lifecycle (verbatim from the official interface):
+ *   1. [onModuleLoaded]   – once per process the module is loaded into
+ *   2. [onPackageLoaded]  – package parsed, default classloader available (Q+)
+ *   3. [onPackageReady]   – AppComponentFactory created; the classloader we want is here
+ *   4. [onHotReloading] / [onHotReloaded] – module reloaded in place; tear down old hooks
+ *
+ * Safety gates applied BEFORE installing any hook:
+ *   - Package name must be one of [TARGET_PACKAGES] (番茄小说 / 红果免费短剧).
+ *   - Process name must equal the package name, i.e. the host's main process (do NOT touch
+ *     `:push`, `:widgetProvider`, `:miniappX`, etc.).
+ *   - versionCode is read and reported, but is **advisory only** — see [SUPPORTED_VERSION_CODES].
+ *
+ * ## Why the version gate is advisory
+ *
+ * Every hook resolves its own target through [ClassResolver] and skips itself with a WARN when
+ * that target is gone; [HookManager] isolates each install in try/catch and keeps a list of the
+ * ones that were skipped. A host update therefore degrades hook-by-hook instead of disabling the
+ * module, and `install summary: installed=N skipped=M lost=[...]` names exactly what was lost.
+ *
+ * The previous design was fail-closed: an unknown versionCode meant *no* hook was installed at
+ * all, so the module looked broken after every host update until someone re-audited the DEX.
+ * That traded a small, visible, partial loss for a total one. Best-effort is strictly better,
+ * because the remaining failure mode (a target that moved) is reported in one log line rather
+ * than requiring a full re-adaptation.
+ */
+class FanqieModule : XposedModule() {
+
+    private val log by lazy { ModuleLog(this) }
+
+    @Volatile
+    private var processName: String = UNKNOWN_PROCESS
+
+    @Volatile
+    private var hookManager: HookManager? = null
+
+    override fun onModuleLoaded(param: ModuleLoadedParam) {
+        processName = param.processName
+        log.info(
+            "module loaded: process=$processName api=$apiVersion " +
+                "framework=$frameworkName v${frameworkVersion}"
+        )
+        // 这条只在框架日志/logcat 里，状态文件要等 onPackageReady 才开；两处都写是为了
+        // 「模块加载了但没走到 onPackageReady」这种报告也能看出跑的是哪个构建。
+        log.info(
+            "module build: " +
+                ModuleMeta.describe(runCatching { getModuleApplicationInfo()?.sourceDir }.getOrNull())
+        )
+    }
+
+    override fun onPackageLoaded(param: PackageLoadedParam) {
+        // Optional hook point for early init; we wait for onPackageReady because that is when the
+        // app classloader is fully wired.
+        if (param.packageName !in TARGET_PACKAGES) return
+        if (!param.isFirstPackage) return
+        log.debug("package loaded: ${param.packageName} (process=$processName)")
+    }
+
+    override fun onPackageReady(param: PackageReadyParam) {
+        val packageName = param.packageName
+        if (packageName !in TARGET_PACKAGES) {
+            // Scope list should already filter, but defensively short-circuit.
+            return
+        }
+        if (!param.isFirstPackage) {
+            log.debug("not first package: $packageName, skip")
+            return
+        }
+        // Every supported host names its main process exactly after the package name; any other
+        // value means we landed in `:push`, `:widgetProvider`, `:miniappX`, … which must stay clean.
+        if (processName != packageName) {
+            log.info("skip non-main process: $processName (package=$packageName)")
+            return
+        }
+
+        // Third log channel: a plain file under the host's cache dir. Needed because some LSPosed
+        // forks never flush their module log, and some devices disable logging system-wide
+        // (logcat returns nothing even as root) — see ModuleLog.
+        //
+        // Opened BEFORE the version check so the "unverified host version" warning and the
+        // install summary below always land in the file, on the channel that actually works.
+        log.statusFile = runCatching {
+            File(param.applicationInfo.dataDir, "cache/fanqiehook.log")
+        }.getOrNull()
+
+        val auditedVersions = SUPPORTED_VERSION_CODES.getValue(packageName)
+        val versionCode = readVersionCode(param)
+        when {
+            versionCode in auditedVersions -> {
+                log.info("host versionCode=$versionCode is in the audited set")
+            }
+            versionCode == -1L -> {
+                log.warn(
+                    "versionCode could not be read on this device (all strategies failed); " +
+                        "installing best-effort against an unknown host version"
+                )
+            }
+            else -> {
+                log.warn(
+                    "unverified host version: versionCode=$versionCode " +
+                        "(audited: ${auditedVersions.sorted()}). Installing best-effort — each " +
+                        "hook looks up its own target and skips itself if the target moved, so " +
+                        "check the install summary below to see what this version lost."
+                )
+            }
+        }
+
+        log.info(
+            "target ready: package=$packageName process=$processName versionCode=$versionCode " +
+                "uid=${param.applicationInfo.uid} hostApk=${param.applicationInfo.sourceDir}"
+        )
+
+        // 自报构建：报告「装了但没效果」时，第一件事是确认进程里跑的到底是哪个版本，
+        // 而不是相信口述（升级没成功 / 装了两份 / 管理器显示和实际加载不是同一个包都可能）。
+        val moduleApkPath = runCatching { getModuleApplicationInfo()?.sourceDir }.getOrNull()
+        log.info("module build: ${ModuleMeta.describe(moduleApkPath)}")
+
+        val resolver = ClassResolver(
+            classLoader = param.classLoader,
+            log = log,
+            // DexKit 2.x loads the DEX straight off disk rather than from the classloader, so it
+            // needs the host's APK source dir.
+            apkPath = param.applicationInfo.sourceDir,
+            // The module's own APK: source of libdexkit.so. DexKit never loads it itself, and in
+            // an injected host process System.loadLibrary cannot see the host's lib path, so the
+            // resolver must extract + System.load() it from here (see ClassResolver docs).
+            moduleApkPath = moduleApkPath,
+            // Host-writable dir used when the .so must be extracted (module runs as host UID).
+            hostDataDir = param.applicationInfo.dataDir
+        )
+        // 命中审计开关：宿主 cache 目录下存在 `fanqiehook.audit` 即打开（发布版也能用，
+        // 不需要专门出一个诊断包）。排查「偶发漏拦」时让用户建这个文件复现一次，
+        // 日志里就能看出那一刻宿主到底问没问我们的闸门。
+        val auditMarker = runCatching {
+            File(param.applicationInfo.dataDir, "cache/fanqiehook.audit")
+        }.getOrNull()
+        val auditHits = auditMarker?.exists() == true
+        log.info(
+            "hook hit audit: " +
+                if (auditHits) "ON (${auditMarker?.path})" else "off"
+        )
+
+        val manager = HookManager(this, log, auditHits = auditHits).also { hookManager = it }
+
+        // Single entry point for every ad-related hook.
+        // Each `installXxx` is internally try/catch; one failure cannot stop the rest.
+        AdHooks(manager, resolver, log).installAll()
+
+        // The one line that answers "did this host version break anything?".
+        // INFO when nothing that this host is expected to have went missing, WARN (naming the
+        // unexpected losses) when the host moved a target the module still expects.
+        val summary = manager.summary()
+        if (manager.unexpectedSkips.isEmpty()) {
+            log.info("install summary: $summary")
+        } else {
+            log.warn("install summary: $summary")
+        }
+    }
+
+    /**
+     * Hot reload: release all hooks so the new generation can re-register them atomically.
+     * The framework guarantees the hook chain is snapshotted; in-flight calls are unaffected.
+     *
+     * Return `true` to confirm that all handles have been retired; `false` would tell the framework
+     * to keep the old handles in place (rarely useful; we always want a clean swap).
+     */
+    override fun onHotReloading(param: HotReloadingParam): Boolean {
+        log.info("hot reloading; releasing ${hookManager?.installedHandles?.size ?: 0} hook handles")
+        hookManager?.unhookAll()
+        hookManager = null
+        return true
+    }
+
+    override fun onHotReloaded(param: HotReloadedParam) {
+        // The new generation will be re-installed through its own `onPackageReady` callback.
+        log.info("hot reload complete; new generation will re-hook via onPackageReady")
+    }
+
+    /**
+     * Read the host app's `versionCode` with multiple strategies, ordered by independence from
+     * host state.
+     *
+     *  1. [ApkVersion.readVersionCode] – parse `versionCode` out of the host APK's binary
+     *     AndroidManifest.xml. Public formats only (ZIP + AXML chunks), no Context, no hidden API;
+     *     this is the strategy that actually works on Android 14+ (see [ApkVersion] for the
+     *     measured failure of strategies 2 and 3 there).
+     *  2. [PackageManager.getPackageArchiveInfo] – public static API, no Context required.
+     *  3. `ActivityThread.currentApplication()` reflection – the legacy path; retained as a
+     *     fallback but unusable at this lifecycle stage (the Application does not exist yet).
+     *  4. Return `-1` so the fail-closed gate can decide whether to refuse hook installation.
+     */
+    private fun readVersionCode(param: PackageReadyParam): Long {
+        // Strategy 1: parse the host APK's AndroidManifest.xml directly.
+        val viaManifest = runCatching {
+            ApkVersion.readVersionCode(param.applicationInfo.sourceDir)
+        }.getOrElse { e ->
+            log.warn("manifest versionCode parse failed: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        if (viaManifest != null) return viaManifest
+
+        // Strategy 2: static PackageManager.getPackageArchiveInfo(sourceDir, flags)
+        val viaArchive = runCatching {
+            val apkPath = param.applicationInfo.sourceDir
+            val pmClass = Class.forName(
+                "android.content.pm.PackageManager",
+                false,
+                param.classLoader
+            )
+            val method = pmClass.getMethod(
+                "getPackageArchiveInfo",
+                java.lang.String::class.java,
+                java.lang.Integer.TYPE
+            )
+            val packageInfo = method.invoke(null, apkPath, 0) as? PackageInfo
+                ?: throw IllegalStateException("getPackageArchiveInfo returned null")
+            packageInfo.longVersionCode
+        }.getOrElse { e ->
+            log.warn("getPackageArchiveInfo failed: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        if (viaArchive != null) return viaArchive
+
+        // Strategy 3: reflect into ActivityThread.currentApplication() → PackageManager
+        val viaActivityThread = runCatching {
+            val activityThread = Class.forName(
+                "android.app.ActivityThread",
+                false,
+                param.classLoader
+            )
+            val application = activityThread
+                .getDeclaredMethod("currentApplication")
+                .invoke(null) as? android.app.Application
+                ?: throw IllegalStateException("currentApplication returned null")
+            val packageInfo: PackageInfo = application.packageManager
+                .getPackageInfo(param.packageName, 0)
+            packageInfo.longVersionCode
+        }.getOrElse { e ->
+            log.warn("ActivityThread.currentApplication failed: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+        if (viaActivityThread != null) return viaActivityThread
+
+        log.error("all versionCode strategies failed; continuing best-effort with an unknown version")
+        return -1L
+    }
+
+    private companion object {
+        const val UNKNOWN_PROCESS = "<unknown>"
+
+        // ---- Module gates -------------------------------------------------------
+        // [SUPPORTED_VERSION_CODES] is an **audit record, not a gate**: it lists the versions that
+        // went through the full DEX-level hook-target audit. A versionCode outside these sets is
+        // logged as "unverified host version" and then installed best-effort anyway.
+        //
+        // Adding an entry here is a documentation act ("these targets were verified"), never a
+        // prerequisite for the module to work on a new host release.
+        //
+        // `com.dragon.read`  – 番茄小说
+        // `com.phoenix.read` – 红果免费短剧
+        //
+        // Both are built from the same ByteDance "dragon" baseline (identical versionCode per
+        // release) and still ship the ad classes under the `com.dragon.read.*` namespace, so a
+        // single AdHooks implementation covers both. Obfuscated delegate names DO differ between
+        // them and between releases (e.g. the NsAdConfigManagerApi impl is `fe3.a` on Fanqie
+        // 73532, `lf3.a` on Fanqie 73732, `yb3.a` on Hongguo 73732), which is exactly why those
+        // are resolved through DexKit by interface rather than by hardcoded name.
+        //
+        // Audit history (DEX-level target + call-site verification performed for each entry):
+        //   73532 (7.3.5.32) Fanqie + Hongguo – 26 targets, all class/method signatures match;
+        //                    Fanqie side misses only the Hongguo-only HongguoBannerServiceImpl
+        //   73732 (7.3.7.32) Fanqie – 25/26 (same Hongguo-only miss), every hook's invoke-site
+        //                    count inside the target's type family identical to 73532
+        //   73732 (7.3.7.32) Hongguo – 26/26
+        //   73718 (7.3.7.18) Fanqie – 25/26 (same Hongguo-only miss); all 21 blocked position
+        //                    strings present with identical occurrence counts to 73732;
+        //                    DexKit-resolved impl identical (lf3.a). Hongguo 73718 not audited
+        //                    (no APK available), hence not registered below.
+        //   73917 (7.3.9.17) Fanqie – 29/30 on device (skipped=1 is the Hongguo-only class, not
+        //                    installed here). Two obfuscated getters moved: the AdHooks targets now
+        //                    resolve by the stable config fields they read (`enableMultiSeriesFlowAd`
+        //                    → p(), `landscapeInsertAdEnable` → s0(); the old hardcoded `q0` now
+        //                    returns long and is a different config). DexKit-resolved ad impl moved
+        //                    lf3.a → eg3.a; fullscreen impl mb3.f. Hongguo 73917 not audited.
+        //   73967 (7.3.9.67) Fanqie – 29/30 on device (skipped=1 is the Hongguo-only class, not
+        //                    installed here). Statically re-checked against the 73967 APK:
+        //                      - both `ExperimentUtil` getters still resolve uniquely by the config
+        //                        field they read (`enableMultiSeriesFlowAd` → p(),
+        //                        `landscapeInsertAdEnable` → s0()); AB table lives in eg3.a#b
+        //                        and holds 40 position names
+        //                      - all 37 module position strings (22 blocked + 15 reward) are present
+        //                        in the host string pool, zero missing
+        //                      - ad impl still eg3.a, fullscreen impl still mb3.f
+        //                    A real in-place upgrade 73732 → 73967 was also observed on a test
+        //                    device, where the field-scoped lookup followed the renamed getter by
+        //                    itself (q0 → s0) with no code change. Hongguo 73967 not audited.
+        //   73932 (7.3.9.32) Fanqie – 相对 73967 全表静态复核，零漂移：
+        //                      - 25 条番茄侧目标（类 + 方法 + 参数 + 返回类型）逐条命中，唯一
+        //                        缺失仍是红果专属 HongguoBannerServiceImpl（番茄侧本来就不存在）
+        //                      - 46 个位置名（22 blocked + 24 preserved）在字符串池里零缺失；
+        //                        广告位 AB 表仍在 eg3.a，45 个位置常量与 73967 逐个一致
+        //                        （含 intelligence_ad / screen_off_ad 两个未分类位）
+        //                      - 字段反查落点未变：ExperimentUtil#p()（enableMultiSeriesFlowAd）、
+        //                        ExperimentUtil#s0()（landscapeInsertAdEnable）、
+        //                        FanqieSearchActivity#q1()/#Y1()/#Z1()（三个 AI 入口字段）
+        //                      - DexKit 接口落点未变：广告配置实现 eg3.a、全屏广告实现 mb3.f
+        //                        （零参 boolean 门控 a / onScreenAdDialogShow）
+        //                      - 32 条 hook 的 invoke 调用点数与 73967 逐条相同（0 条死 hook），
+        //                        ad 命名空间无新增类、无删除类（306084 → 306128 个类）
+        //                    真机实测（本机 73932，v0.8.6）：install summary
+        //                    `hooks installed=32 skipped=1 known-missing=[hongguo-banner-join-revert]`，
+        //                    lost=[]；状态文件里实测拦到 reader_banner / video_reader_ad /
+        //                    creator_ad / splash_ad 以及 canShowScreenAd 闸门，hook 确实在活链路上。
+        //                    对照：未登记的 v0.8.5 在同一台 73932 上同样是 32/33 条，
+        //                    只多一条 `unverified host version` 警告 —— 即本版本纯登记，行为不变。
+        //                    结论：该版本不需要改任何 hook 代码，只是把版本登记进审计集。
+        //   73932 (7.3.9.32) Hongguo – 相对 73732 全表静态复核：
+        //                      - 26 条目标（含红果专属 HongguoBannerServiceImpl）逐条命中
+        //                      - 46 个位置名零缺失；广告位 AB 表 45 个位置常量与 73732 逐个一致
+        //                      - 字段反查落点未变：ExperimentUtil#p()/#s0()；搜索页三个 AI 入口
+        //                        在红果上没有宿主类（FanqieSearchActivity 不存在），本来就跳过，
+        //                        已标注 known-missing，不会算进「丢失」
+        //                      - DexKit 落点随改名自动跟上：广告配置实现 yb3.a → tc3.a，
+        //                        全屏广告实现 g73.f → a83.f（零参 boolean 门控 a /
+        //                        onScreenAdDialogShow 不变）
+        //                      - 32 条 hook 里唯一调用点数变化的是 ExperimentUtil#s0()（4 → 6 个
+        //                        调用点，变多不是变没），其余逐条相同，0 条死 hook
+        //                      - 该版本 ad 命名空间新增 23 个类（含新的 IDrawRewardAdService /
+        //                        DrawRewardAdServiceImpl 激励广告服务）—— 零广告模式下 checkAdAvailable
+        //                        一律返回「无广告」，新位无需登记也自动拦
+        //                    真机实测（本机 73932，v0.8.6）：install summary
+        //                    `hooks installed=30 skipped=3 known-missing=[purify-search-ai-float-button,
+        //                    purify-search-ai-banner-entry, purify-search-ai-box-entry]`，lost=[]；
+        //                    实测拦到 creator_ad（via tc3.a）与 canShowScreenAd 闸门。
+        //                    结论：该版本不需要改任何 hook 代码，只是把版本登记进审计集。
+        // Versions sharing one AdHooks implementation because no target moved between them.
+        val SUPPORTED_VERSION_CODES = mapOf(
+            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L, 73967L, 73932L),
+            "com.phoenix.read" to setOf(73532L, 73732L, 73932L)
+        )
+
+        val TARGET_PACKAGES = SUPPORTED_VERSION_CODES.keys
+    }
+}

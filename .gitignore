@@ -39,6 +39,17 @@ Thumbs.db
 LSPosed_*/
 lspd-*/
 scopes*.txt
+
+# Local device audit captures; keep only the small reproducibility record.
+/artifacts/*
+!/artifacts/verified-74132/
+!/artifacts/verified-74132/ORIGINAL_FanqieModule.kt
+!/artifacts/verified-74132/MODIFIED_FanqieModule.kt
+!/artifacts/verified-74132/DIFF_FanqieModule.patch
+!/artifacts/verified-74132/VERIFICATION.txt
+!/artifacts/verified-74132/ROLLBACK.sh
+/artifacts/verified-74132/ROLLBACK_COPY_FanqieModule.kt
+
 # Frida verification scripts (internal, not published)
 frida_verify.js
 frida_min.js

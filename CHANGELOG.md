@@ -34,6 +34,12 @@ v0.8.8 - 修「偶尔漏出一条广告」
 - 现在改成 `deoptimize = true`，与其余闸门一致。拦截范围、拦截名单、日志格式都没变
 - 只影响首次安装/升级后的第一次启动（重建 hook 时多做一次 deoptimize）
 
+## 0.8.9
+v0.8.9 - 适配番茄小说 7.4.1.32（versionCode 74132）
+- USB 真机安装并启动验证：32 条 hook 全部安装，唯一跳过仍是红果专属 `hongguo-banner-join-revert`
+- 新版本的混淆漂移由现有动态定位自动跟上：横屏开关从 `s0()` 变为 `u0()`，全屏广告实现变为 `pb3.f`，搜索页 AI 悬浮入口变为 `r1()`
+- `NsAdImpl`、`ReaderAdManager`、`NsVipImpl`、广告位过滤和开屏闸门均保持命中，不新增拦截逻辑
+
 ## 0.8.7
 v0.8.7 - 排查线索增强（模块自报版本）
 - 日志与状态文件新增一行 `module build: version=v0.8.7 (versionCode=30) apk=/data/app/…`。

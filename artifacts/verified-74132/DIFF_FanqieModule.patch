@@ -1,0 +1,23 @@
+diff --git "a/artifacts/verified-74132/ORIGINAL_FanqieModule.kt" "b/artifacts/verified-74132/MODIFIED_FanqieModule.kt"
+index 6b9d22c..b056158 100644
+--- "a/artifacts/verified-74132/ORIGINAL_FanqieModule.kt"
++++ "b/artifacts/verified-74132/MODIFIED_FanqieModule.kt"
+@@ -347,9 +347,17 @@ class FanqieModule : XposedModule() {
+         //                    purify-search-ai-banner-entry, purify-search-ai-box-entry]`，lost=[]；
+         //                    实测拦到 creator_ad（via tc3.a）与 canShowScreenAd 闸门。
+         //                    结论：该版本不需要改任何 hook 代码，只是把版本登记进审计集。
++        //   74132 (7.4.1.32) Fanqie – USB 真机 + APK 静态复核：
++        //                      - 目标 APK SHA-256：BFD75DE3008A204B21CCF403F0B167E38999B292BF2934FBF6D106ABBF0488C0
++        //                      - 32 条 hook 全部安装，唯一跳过仍是红果专属 hongguo-banner-join-revert
++        //                      - 关键漂移由现有动态定位自动跟上：ExperimentUtil#u0()、全屏实现 pb3.f、
++        //                        FanqieSearchActivity#r1()/Y1()/Z1()；NsAdImpl / ReaderAdManager / NsVipImpl
++        //                        等稳定类与方法签名全部命中
++        //                      - 真机日志：hooks installed=32 skipped=1 known-missing=[hongguo-banner-join-revert]
++        //                    结论：74132 不需要新增拦截逻辑，只登记为已审计版本。
+         // Versions sharing one AdHooks implementation because no target moved between them.
+         val SUPPORTED_VERSION_CODES = mapOf(
+-            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L, 73967L, 73932L),
++            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L, 73967L, 73932L, 74132L),
+             "com.phoenix.read" to setOf(73532L, 73732L, 73932L)
+         )
+ 

@@ -1,0 +1,108 @@
+FanqieHook 0.8.9 / 番茄小说 7.4.1.32 (versionCode 74132)
+Generated: 2026-10-24 (Asia/Shanghai)
+
+BOUND TARGET
+- Workspace: F:\\gz\\FanqieHook
+- USB ADB serial: 9df37f6f
+- All device commands in this record use `adb -s 9df37f6f`; no global adb disconnect/restart was used.
+- Host APK SHA-256: BFD75DE3008A204B21CCF403F0B167E38999B292BF2934FBF6D106ABBF0488C0
+
+ROLE PATHS
+- ORIGINAL_FILE: F:\\gz\\FanqieHook\\artifacts\\verified-74132\\ORIGINAL_FanqieModule.kt
+- MODIFIED_FILE: F:\\gz\\FanqieHook\\artifacts\\verified-74132\\MODIFIED_FanqieModule.kt
+- DIFF_FILE: F:\\gz\\FanqieHook\\artifacts\\verified-74132\\DIFF_FanqieModule.patch
+- ROLLBACK: F:\\gz\\FanqieHook\\artifacts\\verified-74132\\ROLLBACK.sh
+
+CHANGED SYMBOL / FIELD
+- `FanqieModule.SUPPORTED_VERSION_CODES["com.dragon.read"]`
+- Added literal version code `74132L`.
+- Added the 74132 audit record documenting the static APK review and USB runtime result.
+- No AdHooks implementation logic was changed for this version; runtime target resolution followed existing dynamic lookup.
+
+HASHES
+- ORIGINAL_FILE SHA-256: 477FB2B19C474F5B6E9B3FF23F1CF0D4B4BC20CFF991C82AD5B60FCF8BFA68A4
+- MODIFIED_FILE SHA-256: 8557C00EFF0C4C0257CF95A41CF7FE1B0EEDEC07774E2D86695E3949BF0158B0
+- DIFF_FILE SHA-256: 60905E0AA8B04D8B07758108A39E078CDDF224D36854B99C09D91785D0815E25
+
+STATIC BASELINE / MODIFIED / ROLLBACK CHECK
+Input: versionCode=74132; evaluator checks whether the bound source contains the audited literal `74132L`.
+
+BASELINE command:
+`Select-String -LiteralPath F:\\gz\\FanqieHook\\artifacts\\verified-74132\\ORIGINAL_FanqieModule.kt -Pattern '74132L' -Quiet`
+stdout: `unverified host version=74132`
+stderr: `<empty>`
+exit: `1`
+
+MODIFIED command:
+`Select-String -LiteralPath F:\\gz\\FanqieHook\\artifacts\\verified-74132\\MODIFIED_FanqieModule.kt -Pattern '74132L' -Quiet`
+stdout: `host versionCode=74132 is in the audited set`
+stderr: `<empty>`
+exit: `0`
+
+ROLLBACK command (separate copy):
+`"C:\\Program Files\\Git\\bin\\bash.exe" F:/gz/FanqieHook/artifacts/verified-74132/ROLLBACK.sh F:/gz/FanqieHook/artifacts/verified-74132/ROLLBACK_COPY_FanqieModule.kt`
+stdout: `restored=F:/gz/FanqieHook/artifacts/verified-74132/ROLLBACK_COPY_FanqieModule.kt`
+stderr: `<empty>`
+exit: `0`
+
+ROLLBACK behavior with the same input:
+`Select-String -LiteralPath F:\\gz\\FanqieHook\\artifacts\\verified-74132\\ROLLBACK_COPY_FanqieModule.kt -Pattern '74132L' -Quiet`
+stdout: `unverified host version=74132`
+stderr: `<empty>`
+exit: `1`
+- Restored copy SHA-256: 477FB2B19C474F5B6E9B3FF23F1CF0D4B4BC20CFF991C82AD5B60FCF8BFA68A4
+- Restored hash equals ORIGINAL_FILE: true
+- MODIFIED_FILE was retained with the goal reapplied after rollback verification.
+
+BUILD / STATIC VERIFICATION
+Command: `.\gradlew.bat assembleRelease --no-daemon --console=plain`
+stdout: `BUILD SUCCESSFUL in 13s`; `49 actionable tasks: 1 executed, 48 up-to-date`
+stderr: `<empty>`
+exit: `0`
+
+Command: `git diff --check`
+stdout: `<empty>`
+stderr: `<empty>`
+exit: `0`
+
+Command: `git apply --check --reverse --whitespace=nowarn artifacts\\verified-74132\\DIFF_FanqieModule.patch`
+stdout: `<empty>`
+stderr: `<empty>`
+exit: `0` (DIFF_FILE applies cleanly against MODIFIED_FILE)
+
+USB RUNTIME BASELINE (module audit off)
+Command: `adb -s 9df37f6f shell su -c 'cat /data/data/com.dragon.read/cache/fanqiehook.log'`
+Observed:
+- `host versionCode=74132 is in the audited set`
+- `hook hit audit: off`
+- `install summary: hooks installed=32 skipped=1 known-missing=[hongguo-banner-join-revert]`
+
+USB RUNTIME MODIFIED (audit marker on)
+Marker input: `/data/user/0/com.dragon.read/cache/fanqiehook.audit`
+Command: `adb -s 9df37f6f shell su -c 'cat /data/data/com.dragon.read/cache/fanqiehook.log'`
+Observed:
+- `host versionCode=74132 is in the audited set`
+- `hook hit audit: ON (/data/user/0/com.dragon.read/cache/fanqiehook.audit)`
+- `install summary: hooks installed=32 skipped=1 known-missing=[hongguo-banner-join-revert]`
+- `hook hit[1]: position-filter:ig3.a`
+- `hook hit[1]: fullscreen-ad-depend-gate`
+- `hook hit[2]: position-filter:ig3.a`
+- Blocked positions observed: `splash_ad`, `creator_ad`; fullscreen gate observed through `NsUtilsDependImpl.canShowScreenAd`.
+- Version drift resolved at runtime: `ExperimentUtil#u0`, `pb3.f`, `FanqieSearchActivity#r1/#Y1/#Z1`.
+
+USB CLEANUP / HEALTH
+Command: `adb -s 9df37f6f shell su -c "rm -f /data/user/0/com.dragon.read/cache/fanqiehook.audit"`
+exit: `0`
+Command: `adb -s 9df37f6f shell su -c "test ! -e /data/user/0/com.dragon.read/cache/fanqiehook.audit"`
+stdout: `<empty>`
+stderr: `<empty>`
+exit: `0` (marker absent)
+Command: `adb -s 9df37f6f shell 'pidof com.dragon.read'`
+stdout: `28018`
+exit: `0`
+Command: `adb -s 9df37f6f get-state`
+stdout: `device`
+exit: `0`
+
+EVIDENCE LOG
+- F:\\gz\\FanqieHook\\artifacts\\usb-9df37f6f\\fanqiehook-74132-final.log
