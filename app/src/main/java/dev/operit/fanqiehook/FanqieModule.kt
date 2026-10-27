@@ -158,7 +158,7 @@ class FanqieModule : XposedModule() {
 
         // Single entry point for every ad-related hook.
         // Each `installXxx` is internally try/catch; one failure cannot stop the rest.
-        AdHooks(manager, resolver, log).installAll()
+        AdHooks(manager, resolver, log, hostPackage = packageName).installAll()
 
         // The one line that answers "did this host version break anything?".
         // INFO when nothing that this host is expected to have went missing, WARN (naming the
