@@ -565,9 +565,19 @@ class AdHooks(
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun installReaderShortSeriesBannerHook() {
+        // 74132: the show animation is `v93.d#r()`.
+        // 74332: R8 turned that class into a synthetic lambda — only `<init>` + `invoke(Object)`
+        // remain, and the whole show body (the one that logs "currentPosition = ", calls
+        // b->l(Z) / b->g(I) / ExperimentUtil.V(I)) moved inside `invoke`. Hooking it is the same
+        // suppression point under a different name, so fall back instead of losing the hook.
+        val target = resolver.findMethod("v93.d", "r")
+            ?: resolver.findClass("v93.d")?.declaredMethods?.firstOrNull { m ->
+                m.name == "invoke" && m.parameterCount == 1
+            }?.apply { isAccessible = true }
+
         hooks.install(
             id = "reader-short-series-banner-show",
-            method = resolver.findMethod("v93.d", "r"),
+            method = target,
             deoptimize = true,
             body = { /* no-op: suppress the reader-only short-series promotion banner */ },
         )
@@ -590,22 +600,35 @@ class AdHooks(
             "com.dragon.read.component.biz.impl.bookmall.videotab.guide.SeriesGuideFloatingView"
         ) ?: return
 
-        val manager = resolver.findClassImplementingInterface(
-            "ym4.q0",
-            methodName = "onLoginFailed"
-        ).firstOrNull { cls ->
-            cls.declaredMethods.any { method ->
-                method.name == "h" &&
-                    method.parameterCount == 1 &&
-                    method.parameterTypes[0] == guideView
+        // 管理器接口是混淆名，且每次版本漂移都会换包：
+        //   74132: ym4.q0    74332: bo4.q0（实现类 a34.o → e44.o）
+        // 所以不锁死接口名，按候选表逐个试；真正的定位条件仍是下面那条方法签名
+        // `h(SeriesGuideFloatingView)`，那是由稳定类型决定的，不随混淆漂移。
+        val manager = listOf("ym4.q0", "bo4.q0")
+            .flatMap { iface ->
+                runCatching {
+                    resolver.findClassImplementingInterface(iface, methodName = "onLoginFailed")
+                }.getOrDefault(emptyList())
             }
-        }
-        val enableGate = manager?.declaredMethods?.firstOrNull { method ->
-            method.name == "f" &&
+            .firstOrNull { cls ->
+                cls.declaredMethods.any { method ->
+                    method.name == "h" &&
+                        method.parameterCount == 1 &&
+                        method.parameterTypes[0] == guideView
+                }
+            }
+
+        // 开关方法名在两版里都叫 f，但不再把它当硬条件：f 找不到时退化成
+        // 「该类上唯一的静态无参 boolean」，仍然只影响这一条引导位。
+        val statics = manager?.declaredMethods
+            ?.filter { method ->
                 method.parameterCount == 0 &&
-                method.returnType == java.lang.Boolean.TYPE &&
-                Modifier.isStatic(method.modifiers)
-        }?.apply { isAccessible = true }
+                    method.returnType == java.lang.Boolean.TYPE &&
+                    Modifier.isStatic(method.modifiers)
+            }
+            ?.map { it.apply { isAccessible = true } }
+            .orEmpty()
+        val enableGate = statics.firstOrNull { it.name == "f" } ?: statics.singleOrNull()
 
         hooks.replaceBooleanFalse(
             id = "series-guide-promotion-enable",

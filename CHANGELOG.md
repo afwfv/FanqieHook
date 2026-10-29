@@ -20,6 +20,24 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 发出去的，用户直接收到了带无效功能的版本。宁可在 debug 上多待几天，也不要发一个
 自己没验过的版本。
 
+## 0.9.1
+v0.9.1 - 会员判定放行 + 7.4.3.32 适配
+- 新增「会员」放行：`PrivilegeManager.isVip()`（宿主把这条沉成了 native，LSPlant 直接挂上）、
+  `isAnyVip()`、按子类型的会员判定，以及 `hasReadPaidBookPrivilege` 等 11 项权益、
+  `NsVipImpl` 的 6 个包装点，共 21 条 hook
+- 「我的」页会出现会员标（SVIP），下载/听书/离线/自动翻页/免广告这些**客户端**闸门放行
+- 边界说清楚：**VIP 章节正文仍由服务端按账号下发**，客户端只改本地判定，正文该锁还是锁
+- 这 21 条一律 `deoptimize = true`：这批 getter 会被 ART 内联，内联副本不经过 hook，
+  0.8.8 的「偶发漏广告」就是这么来的
+- 适配番茄 7.4.3.32（versionCode 74332）：`series-guide-promotion-enable` 的管理器接口
+  从 `ym4.q0` 漂到 `bo4.q0`（实现类 `a34.o` → `e44.o`），改成候选表 + 按
+  `h(SeriesGuideFloatingView)` 签名定位，不再锁死接口名
+- 74332 上 `v93.d` 被 R8 变成合成 lambda（只剩 `<init>` + `invoke`），原 `v93.d#r()` 的
+  显示动画整段挪进了 `invoke`，`reader-short-series-banner-show` 因此加了回退
+- USB 真机 `9df37f6f`（OnePlus 9R / Android 14）实测：52 条 hook 全部装上、skipped=0，
+  「我的」页显示会员标，阅读器正文正常，日志可见 `blocked ad position=reader_banner`
+  / `video_reader_ad` / `creator_ad` 与 `blocked fullscreen-ad gate: NsUtilsDependImpl.canShowScreenAd`
+
 ## 0.9.0
 v0.9.0 - 去除小说阅读器内短剧推广
 - 拦截小说阅读器短剧推荐 banner 的显示动画（`v93.d#r()`）
