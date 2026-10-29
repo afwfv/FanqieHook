@@ -31,7 +31,12 @@ import java.lang.reflect.Modifier
 class AdHooks(
     private val hooks: HookManager,
     private val resolver: ClassResolver,
-    private val log: ModuleLog
+    private val log: ModuleLog,
+    /**
+     * 宿主包名。供 [HongguoViewHooks] 做宿主门控：那组 hook 的 view id 证据只来自
+     * 红果的资源表，番茄上同名混淆 id 可能指向完全不同的 view，必须跳过。
+     */
+    private val hostPackage: String = ""
 ) {
 
     /**
@@ -54,6 +59,7 @@ class AdHooks(
         installSplashAdHooks()
         installFullScreenAdHooks()
         installUiPurifyHooks()
+        HongguoViewHooks(hooks, resolver, log, hostPackage).installAll()
     }
 
 
