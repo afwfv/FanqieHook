@@ -310,25 +310,32 @@ class ClassResolver(
     }
 
     private var dexKitBridge: DexKitBridge? = null
+    private var dexKitInitAttempted = false
     private var nativeLibLoaded = false
+    private var nativeLibLoadAttempted = false
 
+    @Synchronized
     private fun bridge(): DexKitBridge? {
-        if (dexKitBridge == null) {
-            val path = apkPath
-            if (path == null) {
-                log.warn("DexKit unavailable: no apkPath supplied to ClassResolver")
-                return null
-            }
-            if (!ensureDexKitNativeLoaded()) {
-                log.warn("DexKit unavailable: native lib could not be loaded; DexKit lookups disabled")
-                return null
-            }
-            dexKitBridge = try {
-                DexKitBridge.create(path)
-            } catch (t: Throwable) {
-                log.warn("DexKit init failed: ${t.javaClass.simpleName}: ${t.message}")
-                null
-            }
+        dexKitBridge?.let { return it }
+        // A native/bridge failure is stable for this process. Do not repeat the same expensive
+        // APK scan and native-load attempt for every field/interface lookup.
+        if (dexKitInitAttempted) return null
+        dexKitInitAttempted = true
+
+        val path = apkPath
+        if (path == null) {
+            log.warn("DexKit unavailable: no apkPath supplied to ClassResolver")
+            return null
+        }
+        if (!ensureDexKitNativeLoaded()) {
+            log.warn("DexKit unavailable: native lib could not be loaded; DexKit lookups disabled")
+            return null
+        }
+        dexKitBridge = try {
+            DexKitBridge.create(path)
+        } catch (t: Throwable) {
+            log.warn("DexKit init failed: ${t.javaClass.simpleName}: ${t.message}")
+            null
         }
         return dexKitBridge
     }
@@ -347,8 +354,11 @@ class ClassResolver(
      *  2. Fallback: extract the matching-ABI `.so` from the module APK into the host's
      *     `cache/fanqiehook/` and `System.load()` it by absolute path.
      */
+    @Synchronized
     private fun ensureDexKitNativeLoaded(): Boolean {
         if (nativeLibLoaded) return true
+        if (nativeLibLoadAttempted) return false
+        nativeLibLoadAttempted = true
 
         // Strategy 1: standard lookup through this class's classloader (the module's).
         try {

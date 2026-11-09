@@ -4,9 +4,10 @@ import dev.operit.fanqiehook.ClassResolver
 import dev.operit.fanqiehook.HookManager
 import dev.operit.fanqiehook.ModuleLog
 import java.lang.reflect.Modifier
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * All ad-related hooks for `com.dragon.read` versionCodes 73532 (v7.3.5.32) through 74132 (v7.4.1.32).
+ * All ad-related hooks for `com.dragon.read` versionCodes 73532 (v7.3.5.32) through 74332 (v7.4.3.32).
  *
  * Audit status (DEX-level; re-run the whole target audit for every supported versionCode):
  *
@@ -38,6 +39,9 @@ class AdHooks(
      */
     private val hostPackage: String = ""
 ) {
+
+    /** Per implementation/position hit counters used to keep the hot-path logs bounded. */
+    private val positionLogCounts = ConcurrentHashMap<String, Int>()
 
     /**
      * Convenience bundle: install every category. Each `installXxx` is internally try/caught;
@@ -273,30 +277,31 @@ class AdHooks(
             // 写成了 false，所以漏拦只可能出在它身上。
             deoptimize = true,
             shouldBlock = { args ->
-                val position = args.getOrNull(0)?.toString().orEmpty()
-                val source = args.getOrNull(1)
-                // 零广告：checkAdAvailable 问的是「这个位置现在能不能出广告」，一律回答「不能」，
-                // 于是任何广告位都拿不到广告。不再区分被动位 / 用户主动的激励金币位 / 未知位，
-                // 也不再需要维护拦截名单——宿主以后新增广告位同样自动被拦。
-                //
-                // 只影响本查询的返回值，不触碰任何权益数据、会员状态或服务端校验的东西。
-                // 代价：用户主动点的「看视频得金币 / 免广告 / 催更 / 解锁章节」等入口会失效，
-                // 因为那里已经无广告可播。
-                //
-                // 日志仍按来源分类，便于回看拦到了什么：
-                //   (passive)  名单里的被动广告位
-                //   (reward)   原本保留的激励/金币位
-                //   (unnamed)  两边名单都没有的新位置
-                val kind = when {
-                    position in BLOCKED_POSITIONS -> "passive"
-                    position in PRESERVED_POSITIONS -> "reward"
-                    else -> "unnamed"
+                val position = (args.getOrNull(0) as? String).orEmpty()
+                // 默认拦截被动广告与宿主新增位置；仅放行用户主动触发的激励/金币位。
+                // 发奖仍由宿主与服务端按原流程处理。
+                val reward = position in PRESERVED_POSITIONS
+                val hit = positionLogCounts.merge("$className|$position", 1, Int::plus) ?: 1
+                val shouldLog = hit <= POSITION_LOG_FIRST || hit % POSITION_LOG_EVERY == 0
+
+                if (reward) {
+                    if (shouldLog) {
+                        log.info(
+                            "allow reward ad position=$position source=${args.getOrNull(1)} " +
+                                "via $className.checkAdAvailable (hit=$hit)"
+                        )
+                    }
+                    false
+                } else {
+                    if (shouldLog) {
+                        val kind = if (position in BLOCKED_POSITIONS) "passive" else "unnamed"
+                        log.info(
+                            "blocked ad position=$position source=${args.getOrNull(1)} " +
+                                "kind=$kind via $className.checkAdAvailable (hit=$hit)"
+                        )
+                    }
+                    true
                 }
-                log.info(
-                    "blocked ad position=$position source=$source " +
-                        "kind=$kind via $className.checkAdAvailable"
-                )
-                true
             }
         )
     }
@@ -785,10 +790,9 @@ class AdHooks(
          * Positions that are **user-initiated reward / coin surfaces** — the user taps something
          * like "看视频得金币", "看视频免广告", "看视频解锁章节" and thereby asks for a video.
          *
-         * These are **also blocked now**: the position filter answers "no ad available" for every
-         * position (零广告), so this set no longer changes what gets blocked. It is kept as the
-         * record of the call-site analysis and is still used to tag the log line with `kind=reward`
-         * so a block caused by a user tapping a reward entry is distinguishable afterwards.
+         * These positions are deliberately allowed through the position filter so the original
+         * reward flow remains usable. Every other position, including unknown future positions,
+         * is blocked. The set also serves as the record of the call-site analysis below.
          *
          * Analysed call sites:
          *   - `reader_gold_coin_popup` — 金币弹窗
@@ -833,6 +837,11 @@ class AdHooks(
             "video_reading_latest_chapter",
             "video_short_story"
         )
+
+        // Position filtering is a hot path: retain the first few hits and periodic checkpoints
+        // instead of writing three log channels and a status file on every invocation.
+        const val POSITION_LOG_FIRST = 3
+        const val POSITION_LOG_EVERY = 200
 
         // Splash attribution is OFF by default. Flipping this to true causes AttributionManager
         // to skip install-source reporting, which may affect compliance. Review before shipping.

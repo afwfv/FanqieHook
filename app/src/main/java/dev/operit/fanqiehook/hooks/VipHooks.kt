@@ -2,7 +2,6 @@ package dev.operit.fanqiehook.hooks
 
 import dev.operit.fanqiehook.ClassResolver
 import dev.operit.fanqiehook.HookManager
-import dev.operit.fanqiehook.ModuleLog
 
 /**
  * 会员（VIP）判定放行。
@@ -34,8 +33,7 @@ import dev.operit.fanqiehook.ModuleLog
  */
 class VipHooks(
     private val hooks: HookManager,
-    private val resolver: ClassResolver,
-    private val log: ModuleLog
+    private val resolver: ClassResolver
 ) {
 
     fun installAll() {

@@ -1,6 +1,7 @@
 package dev.operit.fanqiehook
 
 import android.content.pm.PackageInfo
+import android.os.Build
 import java.io.File
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.HotReloadedParam
@@ -162,7 +163,7 @@ class FanqieModule : XposedModule() {
         AdHooks(manager, resolver, log, hostPackage = packageName).installAll()
 
         // 会员判定放行（客户端侧；正文仍由服务端按账号下发，见 VipHooks 注释）。
-        VipHooks(manager, resolver, log).installAll()
+        VipHooks(manager, resolver).installAll()
 
         // The one line that answers "did this host version break anything?".
         // INFO when nothing that this host is expected to have went missing, WARN (naming the
@@ -205,7 +206,7 @@ class FanqieModule : XposedModule() {
      *  2. [PackageManager.getPackageArchiveInfo] – public static API, no Context required.
      *  3. `ActivityThread.currentApplication()` reflection – the legacy path; retained as a
      *     fallback but unusable at this lifecycle stage (the Application does not exist yet).
-     *  4. Return `-1` so the fail-closed gate can decide whether to refuse hook installation.
+     *  4. Return `-1` so the caller can report an unknown version and continue best-effort.
      */
     private fun readVersionCode(param: PackageReadyParam): Long {
         // Strategy 1: parse the host APK's AndroidManifest.xml directly.
@@ -232,7 +233,7 @@ class FanqieModule : XposedModule() {
             )
             val packageInfo = method.invoke(null, apkPath, 0) as? PackageInfo
                 ?: throw IllegalStateException("getPackageArchiveInfo returned null")
-            packageInfo.longVersionCode
+            packageInfo.versionCodeCompat()
         }.getOrElse { e ->
             log.warn("getPackageArchiveInfo failed: ${e.javaClass.simpleName}: ${e.message}")
             null
@@ -252,7 +253,7 @@ class FanqieModule : XposedModule() {
                 ?: throw IllegalStateException("currentApplication returned null")
             val packageInfo: PackageInfo = application.packageManager
                 .getPackageInfo(param.packageName, 0)
-            packageInfo.longVersionCode
+            packageInfo.versionCodeCompat()
         }.getOrElse { e ->
             log.warn("ActivityThread.currentApplication failed: ${e.javaClass.simpleName}: ${e.message}")
             null
@@ -261,6 +262,13 @@ class FanqieModule : XposedModule() {
 
         log.error("all versionCode strategies failed; continuing best-effort with an unknown version")
         return -1L
+    }
+
+    /** API 26/27 only expose the legacy Int versionCode; the Long getter was added in API 28. */
+    private fun PackageInfo.versionCodeCompat(): Long {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) return longVersionCode
+        @Suppress("DEPRECATION")
+        return versionCode.toLong()
     }
 
     private companion object {
@@ -359,9 +367,14 @@ class FanqieModule : XposedModule() {
         //                        等稳定类与方法签名全部命中
         //                      - 真机日志：hooks installed=32 skipped=1 known-missing=[hongguo-banner-join-revert]
         //                    结论：74132 不需要新增拦截逻辑，只登记为已审计版本。
+        //   74332 (7.4.3.32) Fanqie – USB 真机实测 52 条 hook 全部安装、skipped=0；
+        //                      series guide 接口 ym4.q0 → bo4.q0 由候选表跟上，v93.d 的
+        //                      显示动画并入 invoke 后由现有回退覆盖。详见 CHANGELOG 0.9.1。
         // Versions sharing one AdHooks implementation because no target moved between them.
         val SUPPORTED_VERSION_CODES = mapOf(
-            "com.dragon.read" to setOf(73532L, 73718L, 73732L, 73917L, 73967L, 73932L, 74132L),
+            "com.dragon.read" to setOf(
+                73532L, 73718L, 73732L, 73917L, 73967L, 73932L, 74132L, 74332L
+            ),
             "com.phoenix.read" to setOf(73532L, 73732L, 73932L)
         )
 

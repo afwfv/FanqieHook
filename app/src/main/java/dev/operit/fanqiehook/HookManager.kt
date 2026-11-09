@@ -232,6 +232,9 @@ class HookManager(
             log.info("hook installed: $id -> ${method.declaringClass.name}#${method.name}")
             handle
         } catch (t: Throwable) {
+            // Installation failures are real losses too. Keep them in the summary instead of
+            // reporting a misleading `skipped=0` merely because target resolution succeeded.
+            skipped += id
             log.error("hook install failed: $id (${method.declaringClass.name}#${method.name})", t)
             null
         }
@@ -246,6 +249,7 @@ class HookManager(
         installedIds.clear()
         skipped.clear()
         knownMissing.clear()
+        hitCounts.clear()
     }
 
     private companion object {

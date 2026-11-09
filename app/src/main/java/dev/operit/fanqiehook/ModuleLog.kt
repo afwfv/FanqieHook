@@ -41,6 +41,8 @@ class ModuleLog(
     var statusFile: File? = null
 ) {
 
+    private val statusLock = Any()
+
     fun verbose(message: String) = emit(Log.VERBOSE, "VERBOSE", message, null)
 
     fun debug(message: String) = emit(Log.DEBUG, "DEBUG", message, null)
@@ -74,8 +76,12 @@ class ModuleLog(
     private fun writeStatus(text: String) {
         val f = statusFile ?: return
         runCatching {
-            if (f.length() > MAX_STATUS_BYTES.toLong()) trim(f)
-            f.appendText("${TIME_FORMAT.format(Date())} $text\n")
+            // Hooks can fire on binder/UI/worker threads at the same time. Keep the trim+append
+            // atomic and protect SimpleDateFormat, which is not thread-safe.
+            synchronized(statusLock) {
+                if (f.length() > MAX_STATUS_BYTES.toLong()) trim(f)
+                f.appendText("${TIME_FORMAT.format(Date())} $text\n")
+            }
         }
     }
 
