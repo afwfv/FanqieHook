@@ -20,6 +20,39 @@ CI 的发布任务**只由 push 到 main 触发**（`.github/workflows/sync-xpos
 发出去的，用户直接收到了带无效功能的版本。宁可在 debug 上多待几天，也不要发一个
 自己没验过的版本。
 
+## 0.9.3
+v0.9.3 - 74532 适配 + 修复「摘要谎报」+ 激励链观测 + Java 层反检测
+- **适配番茄小说 7.4.5.32（versionCode 74532）并真机验证**：`install summary` 为
+  `hooks installed=69 skipped=3`，`lost` 只剩两条确实没落点的（阅读器短剧 banner、短剧导流），
+  实测拦到 `creator_ad` 与 `canShowScreenAd` 闸门
+- **20 条闸门补 `deoptimize`**：此前 v0.8.8 只修了 `checkAdAvailable` 一条，其余 20 条
+  （TopView、VIP 入口、开屏三个 view、短剧横屏插入、搜索页 AI 三入口等）仍是默认 false。
+  ART 把这些小方法内联进调用方后，内联副本不经过 hook —— 这正是「大部分时候拦住了、
+  偶尔漏一条、日志里一行都没有」的根因
+- **摘要不再谎报**：DexKit 没找到实现类、候选接口全落空、宿主专属类缺失这些「静默降级」
+  以前只写一行 WARN，摘要照样 `skipped=0`。现在统一走 `reportLoss()`，会如实出现在
+  `lost=[...]` 里。74532 的实测结果就是靠这一条才看见那两条缺失
+- **同名重载不再猜**：`findMethodIgnoringParams` 原来是 `firstOrNull`，遇到重载直接取第一个；
+  改为「候选必须唯一，否则跳过并列出全部签名」
+- **no-op hook 校验返回值**：`reader-short-series-banner-show`、开屏三个 `show*View` 这类
+  「不 proceed」的 hook，若目标不是 void，返回 null 会被宿主当返回值收下。现在要求 void
+- **DexKit 退场释放**：热重载时 `closeBridge()`，不再每代泄漏一个 native 句柄
+- **新增激励链观测（只读）**：把「看视频得金币」的五跳全部记进
+  `cache/fanqiehook.reward.jsonl` —— SDK 完成回调 → `NovelRewardAdDependImpl#getReward`
+  → `ITaskService` → `TaskServiceImpl` → LuckyCat `getReward` → `onSuccess/onFailed`。
+  发奖是服务端判断题：客户端提前触发只会拿到拒绝码，金币不会增加（0.7.0 的教训）。
+  这些日志是判断「秒领卡在哪一跳」的唯一依据
+- **新增 Java 层反检测**：`PackageManager` 包枚举里摘掉 lsposed/magisk/frida 类包名；
+  `Runtime.exec` 命中环境探测命令时记录命令行 + 调用栈（默认只记不拦，`fanqiehook.flags`
+  里 `n9.blockExec=1` 才拦）。实测已抓到宿主启动期的 `getprop ro.build.version.emui /
+  magic / ro.soc.model` 探测链
+- **开关文件**：`/data/data/com.dragon.read/cache/fanqiehook.flags`，`key=0|1`。
+  观测类默认开，改行为类默认关
+- **新增网络层审计（只读）**：`m44.a#intercept` 记录广告召回 / 发奖 / 金币类请求的
+  method 与 URL（74532 上 5 个 `INetworkApi` 入口已改名，装不上，摘要里如实计为 lost）
+- 静态补记：74532 上 `ExperimentUtil` 的字段反查落点漂到 `q()` / `y0()`，
+  广告配置实现变为 `ii3.a`、全屏广告 `nd3.f`（均由现有的字段/接口反查自动跟上，无需硬编码）
+
 ## 0.9.2
 v0.9.2 - 激励广告放行与稳定性优化
 - 保留用户主动触发的激励/金币广告，其他被动广告与新增未知广告位继续默认拦截

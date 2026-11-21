@@ -58,6 +58,23 @@ class HookManager(
 
     val installedHandles: List<HookHandle> get() = installed.toList()
 
+    /** 已安装 id（安装顺序）：自检与摘要用。 */
+    fun installedIdList(): List<String> = installedIds.toList()
+
+    /** 单个 hook 的命中计数；audit 关闭时恒为 0，结论无意义。 */
+    fun hitCountOf(id: String): Int = hitCounts[id] ?: 0
+
+    /** 命中审计是否打开（由宿主 cache 下的 fanqiehook.audit 决定）。 */
+    fun auditEnabled(): Boolean = auditHits
+
+    /**
+     * 把「静默降级」计入 skipped：DexKit 找不到实现类、候选接口全落空、宿主专属类缺失
+     * 这类情况以前只写一行 WARN，摘要照样报 skipped=0 —— 于是"安装成功"变成一句
+     * 无法证伪的话。走 noteSkip 之后它们会出现在 lost=[...] 里。
+     */
+    fun reportLoss(id: String, reason: String): HookHandle? = noteSkip(id, reason)
+
+
     /**
      * hook ids that were skipped and are NOT explained by host-specific differences — i.e. the ones
      * that actually indicate this host version moved a target the module still expects.
@@ -159,10 +176,21 @@ class HookManager(
         id: String,
         method: Method?,
         deoptimize: Boolean = false,
+        /**
+         * 为 true 时要求目标是 void 方法。
+         *
+         * no-op 型 hook 靠"不 proceed"实现拦截、函数体返回 null；如果目标不是 void，
+         * 这个 null 会被框架当成返回值塞回宿主，表现为 NPE/ClassCastException。
+         */
+        requireVoid: Boolean = false,
         body: (Chain) -> Any?
     ): HookHandle? {
         if (method == null) {
             return noteSkip(id, "method not found")
+        }
+        if (requireVoid && method.returnType != java.lang.Void.TYPE) {
+            log.warn("skip hook $id: expected void, got ${method.returnType.name}")
+            return reportLoss(id, "not a void method: ${method.returnType.name}")
         }
         return installInternal(id, method, deoptimize, body)
     }

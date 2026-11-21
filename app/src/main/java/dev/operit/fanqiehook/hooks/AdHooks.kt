@@ -107,6 +107,7 @@ class AdHooks(
         val impls = resolver.findClassImplementingInterface(iface, "onScreenAdDialogShow")
         if (impls.isEmpty()) {
             log.warn("fullscreen-ad: DexKit found no $iface impl; only the depend gate is hooked")
+            hooks.reportLoss("fullscreen-ad", "no IActivityScreenAdManager impl on this host")
             return
         }
         for (cls in impls) {
@@ -122,6 +123,7 @@ class AdHooks(
             }
             if (gates.isEmpty()) {
                 log.warn("fullscreen-ad: no zero-arg boolean gate found on ${cls.name}")
+                hooks.reportLoss("fullscreen-ad", "no zero-arg boolean gate on ${cls.name}")
             }
             for (m in gates) {
                 hooks.replaceBooleanFalse(
@@ -155,6 +157,7 @@ class AdHooks(
 
         hooks.replaceBooleanFalse(
             id = "reader-video-ad",
+            deoptimize = true,
             method = resolver.findMethod(nsAd, "canReaderVideoAdShow"),
         )
 
@@ -180,6 +183,7 @@ class AdHooks(
 
         hooks.replaceBooleanFalse(
             id = "topview-main",
+            deoptimize = true,
             method = resolver.findMethod(
                 nsAd,
                 "checkCanShowTopViewInMainPage",
@@ -189,6 +193,7 @@ class AdHooks(
 
         hooks.replaceBooleanFalse(
             id = "topview-reader",
+            deoptimize = true,
             method = resolver.findMethod(
                 nsAd,
                 "checkCanShowTopViewInReader",
@@ -215,11 +220,13 @@ class AdHooks(
 
         hooks.replaceBooleanFalse(
             id = "series-pause-enable",
+            deoptimize = true,
             method = resolver.findMethod(pause, "enablePauseAd"),
         )
 
         hooks.replaceBooleanFalse(
             id = "series-pause-show",
+            deoptimize = true,
             method = resolver.findMethodIgnoringParams(pause, "canShowPauseAd", returnTypeName = "boolean"),
         )
     }
@@ -249,6 +256,7 @@ class AdHooks(
         )
         if (impls.isEmpty()) {
             log.warn("position-filter: DexKit found no NsAdConfigManagerApi impl; only NsAdImpl hooked")
+            hooks.reportLoss("position-filter", "no NsAdConfigManagerApi impl on this host")
         } else {
             for (cls in impls) {
                 if (cls.name == nsAd) continue
@@ -331,18 +339,21 @@ class AdHooks(
         // 搜索页 AI 悬浮球
         hooks.replaceBooleanFalse(
             id = "purify-search-ai-float-button",
+            deoptimize = true,
             method = resolver.findNoArgBooleanGetterReadingField(searchActivity, "showFloatButton"),
             knownMissingOnMiss = true,
         )
         // 搜索页 banner 里的 AI 入口
         hooks.replaceBooleanFalse(
             id = "purify-search-ai-banner-entry",
+            deoptimize = true,
             method = resolver.findNoArgBooleanGetterReadingField(searchActivity, "entryInBanner"),
             knownMissingOnMiss = true,
         )
         // 搜索框里的 AI 入口
         hooks.replaceBooleanFalse(
             id = "purify-search-ai-box-entry",
+            deoptimize = true,
             method = resolver.findNoArgBooleanGetterReadingField(searchActivity, "entryInSearchBox"),
             knownMissingOnMiss = true,
         )
@@ -362,6 +373,7 @@ class AdHooks(
 
         hooks.replaceBooleanFalse(
             id = "hide-vip-entrance",
+            deoptimize = true,
             method = resolver.findMethod(
                 nsVip,
                 "canShowVipEntranceHere",
@@ -371,6 +383,7 @@ class AdHooks(
 
         hooks.replaceBooleanFalse(
             id = "hide-vip-entrance-in-ad",
+            deoptimize = true,
             method = resolver.findMethod(nsVip, "canShowVipEntranceInAd"),
         )
     }
@@ -387,6 +400,7 @@ class AdHooks(
     private fun installReaderAdManagerHooks() {
         hooks.replaceBooleanTrue(
             id = "reader-fetch-intercept",
+            deoptimize = true,
             method = resolver.findMethod(
                 "com.dragon.read.reader.ad.ReaderAdManager",
                 "needInterceptFetchAd",
@@ -412,12 +426,14 @@ class AdHooks(
         // Hide the "no-ad gift" UI banner. Does NOT disable user-initiated rewards.
         hooks.replaceBooleanTrue(
             id = "inspire-disable-ad-gift",
+            deoptimize = true,
             method = resolver.findMethod(nsAd, "disableAdGift"),
         )
 
         // Disable banner dismiss animation, which is purely cosmetic and tightly bound to ad UX.
         hooks.replaceBooleanTrue(
             id = "inspire-disable-banner-dismiss-anim",
+            deoptimize = true,
             method = resolver.findMethod(nsAd, "disableBannerDismissAnimation"),
         )
     }
@@ -436,6 +452,7 @@ class AdHooks(
         if (!ENABLE_ATTRIBUTION_SPLASH_BYPASS) return
         hooks.replaceBooleanFalse(
             id = "experimental-splash-attribution",
+            deoptimize = true,
             method = resolver.findMethod(
                 "com.dragon.read.pages.splash.AttributionManager",
                 "hasHitAttribution"
@@ -511,6 +528,7 @@ class AdHooks(
         )
         hooks.replaceBooleanFalse(
             id = "series-banner-sdk-settings",
+            deoptimize = true,
             method = resolver.findMethod(
                 "com.dragon.read.ad.onestop.seriesbanner.config.SeriesBannerAdConfig",
                 "enableSdkSettings"
@@ -519,6 +537,7 @@ class AdHooks(
         // 红果专属 banner 服务（番茄侧没有这个类，缺失属于正常，不计入「丢失」）
         hooks.replaceBooleanFalse(
             id = "hongguo-banner-join-revert",
+            deoptimize = true,
             method = resolver.findMethod(
                 "com.dragon.read.ad.banner.impl.HongguoBannerServiceImpl",
                 "enableShortSeriesAdJoinRevert"
@@ -548,6 +567,7 @@ class AdHooks(
         )
         hooks.replaceBooleanFalse(
             id = "short-series-landscape-insert-ad",
+            deoptimize = true,
             method = resolver.findNoArgBooleanGetterReadingField(
                 "com.dragon.read.reader.ad.experiment.ExperimentUtil",
                 "landscapeInsertAdEnable"
@@ -582,6 +602,7 @@ class AdHooks(
 
         hooks.install(
             id = "reader-short-series-banner-show",
+            requireVoid = true,
             method = target,
             deoptimize = true,
             body = { /* no-op: suppress the reader-only short-series promotion banner */ },
@@ -603,7 +624,10 @@ class AdHooks(
     private fun installSeriesGuideHook() {
         val guideView = resolver.findClass(
             "com.dragon.read.component.biz.impl.bookmall.videotab.guide.SeriesGuideFloatingView"
-        ) ?: return
+        ) ?: run {
+            hooks.reportLoss("series-guide-promotion-enable", "SeriesGuideFloatingView not found")
+            return
+        }
 
         // 管理器接口是混淆名，且每次版本漂移都会换包：
         //   74132: ym4.q0    74332: bo4.q0（实现类 a34.o → e44.o）
@@ -667,6 +691,7 @@ class AdHooks(
         // 阻断热启动开屏广告 Activity 的启动入口（void no-op）
         hooks.install(
             id = "splash-ad-activity-open",
+            requireVoid = true,
             method = resolver.findMethod(
                 nsAd,
                 "openOpeningScreenAdActivity",
@@ -679,16 +704,22 @@ class AdHooks(
         // 双保险：即使 Activity 被其他途径拉起，广告 View 也不会挂载
         hooks.install(
             id = "splash-ad-brand-view",
+            requireVoid = true,
+            deoptimize = true,
             method = resolver.findMethod(splashActivity, "showBrandAdView", "android.view.View"),
             body = { /* no-op */ },
         )
         hooks.install(
             id = "splash-ad-imc-view",
+            requireVoid = true,
+            deoptimize = true,
             method = resolver.findMethod(splashActivity, "showImcSplashView", "android.view.View"),
             body = { /* no-op */ },
         )
         hooks.install(
             id = "splash-ad-natural-view",
+            requireVoid = true,
+            deoptimize = true,
             method = resolver.findMethod(splashActivity, "showNaturalAdView", "android.view.View"),
             body = { /* no-op */ },
         )
@@ -721,7 +752,7 @@ class AdHooks(
         )
     }
 
-    private companion object {
+    internal companion object {
         // Passively displayed positions; USER-INITIATED reward / coin positions are intentionally
         // absent. Additions must be justified by a call-site analysis of
         // `checkAdAvailable(position, source)` — see the derivation note further down.

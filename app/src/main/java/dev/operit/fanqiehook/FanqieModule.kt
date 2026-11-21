@@ -10,6 +10,9 @@ import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
 import dev.operit.fanqiehook.hooks.AdHooks
+import dev.operit.fanqiehook.hooks.AntiDetectHooks
+import dev.operit.fanqiehook.hooks.AdNetworkAudit
+import dev.operit.fanqiehook.hooks.RewardHooks
 import dev.operit.fanqiehook.hooks.VipHooks
 
 /**
@@ -49,6 +52,10 @@ class FanqieModule : XposedModule() {
 
     @Volatile
     private var hookManager: HookManager? = null
+
+    /** 热重载要释放 DexKit 的 native 句柄，所以留一份引用。 */
+    @Volatile
+    private var classResolver: ClassResolver? = null
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         processName = param.processName
@@ -156,6 +163,7 @@ class FanqieModule : XposedModule() {
                 if (auditHits) "ON (${auditMarker?.path})" else "off"
         )
 
+        classResolver = resolver
         val manager = HookManager(this, log, auditHits = auditHits).also { hookManager = it }
 
         // Single entry point for every ad-related hook.
@@ -164,6 +172,18 @@ class FanqieModule : XposedModule() {
 
         // 会员判定放行（客户端侧；正文仍由服务端按账号下发，见 VipHooks 注释）。
         VipHooks(manager, resolver).installAll()
+
+        // 激励视频 / 金币发奖全链观测（只读）：从 SDK 的完成回调到 LuckyCat 发奖的每一跳
+        // 都落一条 jsonl。判断「秒领」卡在客户端还是服务端，只能靠这些真实回调码。
+        val flags = Flags(param.applicationInfo.dataDir)
+        RewardHooks(manager, resolver, log, flags, param.applicationInfo.dataDir).installAll()
+
+        // 网络层审计（只读）：广告召回 / 发奖 / 任务 / 金币类请求的 URL 与关键 query。
+        // 金币宝箱那条「看视频领 2317」实测不走小说阅读器的奖励链，只能从这一层看。
+        AdNetworkAudit(manager, resolver, log, flags, param.applicationInfo.dataDir).installAll()
+
+        // 反检测（Java 层）：包枚举过滤 + 检测命令取证。
+        AntiDetectHooks(manager, resolver, log, flags, param.applicationInfo.dataDir).installAll()
 
         // The one line that answers "did this host version break anything?".
         // INFO when nothing that this host is expected to have went missing, WARN (naming the
@@ -187,6 +207,8 @@ class FanqieModule : XposedModule() {
         log.info("hot reloading; releasing ${hookManager?.installedHandles?.size ?: 0} hook handles")
         hookManager?.unhookAll()
         hookManager = null
+        classResolver?.closeBridge()
+        classResolver = null
         return true
     }
 
@@ -373,7 +395,7 @@ class FanqieModule : XposedModule() {
         // Versions sharing one AdHooks implementation because no target moved between them.
         val SUPPORTED_VERSION_CODES = mapOf(
             "com.dragon.read" to setOf(
-                73532L, 73718L, 73732L, 73917L, 73967L, 73932L, 74132L, 74332L
+                73532L, 73718L, 73732L, 73917L, 73967L, 73932L, 74132L, 74332L, 74532L
             ),
             "com.phoenix.read" to setOf(73532L, 73732L, 73932L)
         )

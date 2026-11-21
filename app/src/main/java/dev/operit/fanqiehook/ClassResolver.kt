@@ -180,9 +180,24 @@ class ClassResolver(
     ): Method? {
         val owner = findClass(className) ?: return null
         return try {
-            val hit = owner.declaredMethods.firstOrNull { m ->
-                m.name == methodName && matchesReturnType(m.returnType, returnTypeName)
+            // 同名同返回类型的候选必须唯一。以前这里是 firstOrNull —— 遇到重载直接取第一个，
+            // 等于拿宿主的开关去赌签名（PrivilegeManager#b 这类类上就有多个重载）。
+            // 宁可跳过并在日志里列出全部候选，也不挂错方法。
+            val cands = owner.declaredMethods.filter { m ->
+                m.name == methodName &&
+                    matchesReturnType(m.returnType, returnTypeName) &&
+                    !m.isSynthetic
             }
+            if (cands.size > 1) {
+                log.warn(
+                    "method scan $className#$methodName: ${cands.size} candidates, refusing to guess: " +
+                        cands.joinToString("; ") {
+                            "${it.name}(${it.parameterTypes.joinToString(",") { p -> p.simpleName }})"
+                        }
+                )
+                return null
+            }
+            val hit = cands.firstOrNull()
             if (hit == null) {
                 // Same diagnostic contract as [describeCandidates]: name the methods that are on
                 // this class and return the expected type, so a renamed target is readable from
@@ -313,6 +328,19 @@ class ClassResolver(
     private var dexKitInitAttempted = false
     private var nativeLibLoaded = false
     private var nativeLibLoadAttempted = false
+
+    /**
+     * 释放 DexKit 的 native 资源。
+     *
+     * DexKitBridge 持有 native 句柄与映射且从不自己关闭；热重载每代都会新建一个实例，
+     * 反复重载会累积。退场时显式关掉，并把「是否已尝试」复位，让下一代能重建。
+     */
+    @Synchronized
+    fun closeBridge() {
+        runCatching { dexKitBridge?.close() }
+        dexKitBridge = null
+        dexKitInitAttempted = false
+    }
 
     @Synchronized
     private fun bridge(): DexKitBridge? {
